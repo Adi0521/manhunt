@@ -2,6 +2,7 @@
 
 
 import { useState, useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
 
 import supabase, { hasSupabaseEnv } from "../utils/supabase";
 // import adminAuthClient from "../utils/supabase-auth";
@@ -10,6 +11,8 @@ import type { Session } from '@supabase/supabase-js';
 import { Button } from "@/components/ui/button";
 
 import { toast } from "sonner";
+
+const BoundaryMapClient = dynamic(() => import("./BoundaryMapClient"), { ssr: false });
 
 type UserListProps = {
     users: string[];
@@ -21,7 +24,7 @@ export default function UserList({ users }: UserListProps) {
 
     const [hunts, setHunts] = useState<any[]>([]);
 
-    const [tab, setTab] = useState<"teams" | "adjustment">("teams");
+    const [tab, setTab] = useState<"teams" | "adjustment" | "boundary">("teams");
 
     const [everyonePoints, setEveryonePoints] = useState<[string, number][]>([]);
 
@@ -230,7 +233,6 @@ export default function UserList({ users }: UserListProps) {
                                     ? "bg-gray-300 dark:bg-green-400 text-black font-bold"
                                     : "text-gray-500"
                             }`}
-                            style={{ borderRadius: tab === "teams" ? "0.5rem 0 0 0.5rem" : "0.5rem 0 0 0.5rem" }}
                             onClick={() => setTab("teams")}
                         >
                             Teams
@@ -241,10 +243,19 @@ export default function UserList({ users }: UserListProps) {
                                     ? "bg-gray-300 dark:bg-green-400 text-black font-bold"
                                     : "text-gray-500"
                             }`}
-                            style={{ borderRadius: tab === "adjustment" ? "0 0.5rem 0.5rem 0" : "0.5rem 0 0 0.5rem" }}
                             onClick={() => setTab("adjustment")}
                         >
                             Adjustment
+                        </button>
+                        <button
+                            className={`flex-1 px-4 py-2 transition-colors duration-200 focus:outline-none ${
+                                tab === "boundary"
+                                    ? "bg-gray-300 dark:bg-green-400 text-black font-bold"
+                                    : "text-gray-500"
+                            }`}
+                            onClick={() => setTab("boundary")}
+                        >
+                            Boundary
                         </button>
                     </div>
 
@@ -335,6 +346,18 @@ export default function UserList({ users }: UserListProps) {
                                 </div>
                             ))}
                             </div>
+                        </div>
+                    )}
+
+                    {tab === "boundary" && (
+                        <div className="flex flex-col gap-2">
+                            <h1 className="text-2xl text-center">Set Play Boundary</h1>
+                            <p className="text-sm text-center text-gray-500 dark:text-gray-400 mb-2">
+                                Draw the area players must stay within. Saved to the current active hunt.
+                            </p>
+                            <BoundaryMapClient
+                                huntId={hunts.length > 0 && hunts[hunts.length - 1]?.runners ? hunts[hunts.length - 1].id : null}
+                            />
                         </div>
                     )}
                 </div>
