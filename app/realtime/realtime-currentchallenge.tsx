@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-import supabase from "../utils/supabase";
+import supabase, { hasSupabaseEnv } from "../utils/supabase";
 
 import type { Session } from '@supabase/supabase-js'
 
@@ -17,7 +17,10 @@ export default function CurrentChallengeStream({ theChallenge }: { theChallenge:
     }, [theChallenge]);
 
     useEffect(() => {
-        const channel = supabase.channel("realtimestream:drawntasks-stream").on("postgres_changes", {
+        const sb = supabase;
+        if (!hasSupabaseEnv || !sb) return;
+
+        const channel = sb.channel("realtimestream:drawntasks-stream").on("postgres_changes", {
             event: "INSERT",
             schema: "public",
             table: "drawntasks"
@@ -34,14 +37,17 @@ export default function CurrentChallengeStream({ theChallenge }: { theChallenge:
         }).subscribe();
 
         return () => {
-            supabase.removeChannel(channel);
+            sb.removeChannel(channel);
         }
 
     }, []);
 
 
     useEffect(() => {
-        const channel = supabase.channel("realtimestream:drawntasks-stream-delete").on("postgres_changes", {
+        const sb = supabase;
+        if (!hasSupabaseEnv || !sb) return;
+
+        const channel = sb.channel("realtimestream:drawntasks-stream-delete").on("postgres_changes", {
             event: "DELETE",
             schema: "public",
             table: "drawntasks"
@@ -51,7 +57,7 @@ export default function CurrentChallengeStream({ theChallenge }: { theChallenge:
         }).subscribe();
 
         return () => {
-            supabase.removeChannel(channel);
+            sb.removeChannel(channel);
         }
     }, []);
 

@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 
 import { Button } from "@/components/ui/button"
 
-import supabase from "../utils/supabase";
+import supabase, { hasSupabaseEnv } from "../utils/supabase";
 
 import Image from 'next/image';
 
@@ -19,20 +19,40 @@ export default function AuthPage() {
   
   const [session, setSession] = useState<Session | null>(null)
 
+  const sb = supabase;
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    if (!hasSupabaseEnv || !sb) return;
+
+    sb.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
     })
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = sb.auth.onAuthStateChange((_event, session) => {
       setSession(session)
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
+
+  if (!hasSupabaseEnv || !sb) {
+    return (
+      <div className="min-h-screen bg-stone-300 dark:bg-neutral-900 text-slate-900 dark:text-slate-100">
+        <div className="w-full bg-slate-800 dark:bg-[rgb(20,77,128)] text-white" style={{ height: "40px" }}>
+          <h1 className="absolute l-0 m-2">Manhunt</h1>
+        </div>
+        <div className="max-w-xl mx-auto mt-32 p-6 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700">
+          <h2 className="text-xl font-semibold">Supabase not configured</h2>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+            Set <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to use auth.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (!session) {
     return (
@@ -43,7 +63,7 @@ export default function AuthPage() {
         </div>
         <div className="w-1/2 ml-[25%] mt-32">
           <Auth
-            supabaseClient={supabase}
+            supabaseClient={sb}
             appearance={{
               theme: ThemeSupa,
               variables: {
@@ -90,7 +110,7 @@ export default function AuthPage() {
               <Button className="bg-blue-400" onClick={() => { window.location.href = "/"; }}>Go to Manhunt</Button>
               <Button onClick={() => { window.location.href = "/admin"; }}>Admin</Button>
               <Button className='bg-green-400' onClick={async () => {
-              const { error } = await supabase.auth.signOut()
+              const { error } = await sb.auth.signOut()
               if (error) console.log('Error logging out:', error.message)
               else console.log('Logged out successfully')
               }}>Logout</Button>

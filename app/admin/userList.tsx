@@ -3,12 +3,9 @@
 
 import { useState, useEffect, useRef } from "react";
 
-import supabase from "../utils/supabase";
+import supabase, { hasSupabaseEnv } from "../utils/supabase";
 // import adminAuthClient from "../utils/supabase-auth";
 import type { Session } from '@supabase/supabase-js';
-import createSupbaseServerClient from "../utils/supabase-auth";
-
-import { getUsers } from "../utils/supabase-auth";
 
 import { Button } from "@/components/ui/button";
 
@@ -29,6 +26,8 @@ export default function UserList({ users }: UserListProps) {
     const [everyonePoints, setEveryonePoints] = useState<[string, number][]>([]);
 
     useEffect(() => {
+        if (!hasSupabaseEnv || !supabase) return;
+
         supabase
             .from("hunts")
             .select()
@@ -45,6 +44,8 @@ export default function UserList({ users }: UserListProps) {
     }, []);
 
     useEffect(() => {
+    if (!hasSupabaseEnv || !supabase) return;
+
     supabase.auth.getSession().then(({ data: { session } }) => {
         setSession(session)
     })
@@ -66,17 +67,9 @@ export default function UserList({ users }: UserListProps) {
     //     fetchUsers();
     // }, []);
 
-    async function clientFetchUsers() {
-        let userListFinal = await getUsers();
-        console.log("jabari");
-        console.log(userListFinal);
-    }
-
-    useEffect(() => {
-        clientFetchUsers();
-    }, []);
-
     async function getPoints() {
+        if (!hasSupabaseEnv || !supabase) return;
+
         supabase
         .from("points")
         .select("user, points")
@@ -106,6 +99,11 @@ export default function UserList({ users }: UserListProps) {
 
 
     async function startRun(runners : string[], hunters: string[]) {
+        if (!hasSupabaseEnv || !supabase) {
+            toast("Supabase not configured.");
+            return;
+        }
+
         if (runners.length == 0 || hunters.length == 0) {
             toast("Please select at least one runner and one hunter");
             return;
@@ -163,6 +161,11 @@ export default function UserList({ users }: UserListProps) {
     }
 
     async function terminate() {
+        if (!hasSupabaseEnv || !supabase) {
+            toast("Supabase not configured.");
+            return;
+        }
+
         if (hunts[hunts.length - 1].runners){
             toast("Hunt terminated");
             
@@ -197,6 +200,8 @@ export default function UserList({ users }: UserListProps) {
 
 
     async function modPoints(adjustment: number, user: string, prevpoints: number){
+        if (!hasSupabaseEnv || !supabase) return;
+
         const { error } = await supabase
             .from("points")
             .update({ points: (prevpoints as number) + adjustment })
@@ -207,6 +212,14 @@ export default function UserList({ users }: UserListProps) {
 
     return (
         <>
+            {(!hasSupabaseEnv || !supabase) ? (
+                <div className="rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700 p-6">
+                    <h2 className="text-xl font-semibold">Supabase not configured</h2>
+                    <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                        Set <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.
+                    </p>
+                </div>
+            ) : null}
             {(session && session.user.email == "skparab1@gmail.com") ? (
             <>
                 <div className="flex flex-col gap-4">

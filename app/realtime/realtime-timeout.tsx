@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-import supabase from "../utils/supabase";
+import supabase, { hasSupabaseEnv } from "../utils/supabase";
 
 import type { Session } from '@supabase/supabase-js'
 
@@ -17,7 +17,10 @@ export default function CurrentTimeoutStream({ timeOutStatusRef, timeOutElapsedT
 
 
     useEffect(() => {
-        const channel = supabase.channel("realtimestream:timeout-stream").on("postgres_changes", {
+        const sb = supabase;
+        if (!hasSupabaseEnv || !sb) return;
+
+        const channel = sb.channel("realtimestream:timeout-stream").on("postgres_changes", {
             event: "UPDATE",
             schema: "public",
             table: "hunts"
@@ -32,7 +35,7 @@ export default function CurrentTimeoutStream({ timeOutStatusRef, timeOutElapsedT
         }).subscribe();
 
         return () => {
-            supabase.removeChannel(channel);
+            sb.removeChannel(channel);
         }
 
     }, []);

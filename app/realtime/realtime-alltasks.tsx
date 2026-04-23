@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-import supabase from "../utils/supabase";
+import supabase, { hasSupabaseEnv } from "../utils/supabase";
 
 import type { Session } from '@supabase/supabase-js'
 
@@ -20,7 +20,10 @@ export default function AllTasksStream({ theChallenge }: { theChallenge: [string
     }, [theChallenge]);
 
     useEffect(() => {
-        const channel = supabase.channel("realtimestream:alltasks-stream").on("postgres_changes", {
+        const sb = supabase;
+        if (!hasSupabaseEnv || !sb) return;
+
+        const channel = sb.channel("realtimestream:alltasks-stream").on("postgres_changes", {
             event: "INSERT",
             schema: "public",
             table: "tasks"
@@ -47,7 +50,7 @@ export default function AllTasksStream({ theChallenge }: { theChallenge: [string
         }).subscribe();
 
         return () => {
-            supabase.removeChannel(channel);
+            sb.removeChannel(channel);
         }
 
     }, []);

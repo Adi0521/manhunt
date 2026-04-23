@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-import supabase from "../utils/supabase";
+import supabase, { hasSupabaseEnv } from "../utils/supabase";
 
 import type { Session } from '@supabase/supabase-js'
 
@@ -19,7 +19,10 @@ export default function PointsStream({ pointsArr }: { pointsArr: [string, number
 
 
     useEffect(() => {
-        const channel = supabase.channel("realtimestream:points-stream").on(
+        const sb = supabase;
+        if (!hasSupabaseEnv || !sb) return;
+
+        const channel = sb.channel("realtimestream:points-stream").on(
             "postgres_changes",
             {
                 event: "UPDATE",
@@ -33,7 +36,7 @@ export default function PointsStream({ pointsArr }: { pointsArr: [string, number
 
                 // lets just ignore the payload for now, and get the points
 
-                supabase
+                sb
                     .from("points")
                     .select()
                     .then(({ data }) => {
@@ -95,13 +98,16 @@ export default function PointsStream({ pointsArr }: { pointsArr: [string, number
     useEffect(() => {
         let isMounted = true;
 
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        const sb = supabase;
+        if (!hasSupabaseEnv || !sb) return;
+
+        sb.auth.getSession().then(({ data: { session } }) => {
             if (isMounted) setSession(session);
         });
 
         const {
             data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
+        } = sb.auth.onAuthStateChange((_event, session) => {
             if (isMounted) setSession(session);
         });
 

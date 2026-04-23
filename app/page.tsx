@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 
-import supabase from "./utils/supabase";
+import supabase, { hasSupabaseEnv } from "./utils/supabase";
 
 import RealtimeStream from "./realtime/realtime-stream";
 
@@ -54,13 +54,34 @@ export default function HomePage() {
   const [otherCurrentChallenge, setOtherCurrentChallenge] = useState<[string, number]>(["", 0]);
   const [otherChallenges, setOtherChallenges] = useState<[string, number, number][]>([]);
 
+  if (!hasSupabaseEnv || !supabase) {
+    return (
+      <div className="min-h-screen bg-stone-300 dark:bg-neutral-900 text-slate-900 dark:text-slate-100">
+        <div className="w-full bg-slate-800 dark:bg-[rgb(20,77,128)] text-white" style={{ height: "40px" }}>
+          <h1 className="absolute l-0 m-2">Manhunt</h1>
+        </div>
+        <div className="max-w-xl mx-auto mt-32 p-6 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700">
+          <h2 className="text-xl font-semibold">Supabase not configured</h2>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+            Set <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to use the game.
+          </p>
+          <div className="mt-4">
+            <Button onClick={() => (window.location.href = "/auth")}>Go to setup/login</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const sb = supabase as NonNullable<typeof supabase>;
+
   function initializeStuff(session: Session | null) {
 
     setSession(session);
 
     let recentRunId = 0;
 
-    supabase
+    sb
       .from("hunts")
       .select()
       .then(async ({ data }) => {
@@ -78,7 +99,7 @@ export default function HomePage() {
         if (datasorted && datasorted.length > 0) {
           recentRunId = datasorted[datasorted.length - 1].id;
 
-          const { data: huntData } = await supabase
+          const { data: huntData } = await sb
           .from("hunts")
           .select()
           .eq('id', recentRunId);
@@ -99,7 +120,7 @@ export default function HomePage() {
               useEmail = huntData[0].runners[0];
             }
 
-            let { data } = await supabase
+            let { data } = await sb
               .from("tasks")
               .select()
               .eq('user', useEmail || "NULL")
@@ -128,7 +149,7 @@ export default function HomePage() {
 
 
           if (huntData && huntData[0] && huntData[0].runners && huntData[0].runners[0]) {
-            supabase
+            sb
               .from("drawntasks")
               .select()
               .eq('user', huntData[0].runners[0])
@@ -141,7 +162,7 @@ export default function HomePage() {
                 
               });
 
-            supabase
+            sb
               .from("tasks")
               .select()
               .eq('user', huntData[0].runners[0])
@@ -182,7 +203,7 @@ export default function HomePage() {
         }
       });
 
-    supabase
+    sb
       .from("points")
       .select()
       .eq('user', session?.user.email || "NULL")
@@ -194,7 +215,7 @@ export default function HomePage() {
         }
       });
 
-    supabase
+    sb
       .from("points")
       .select()
       .then(({ data }) => {
@@ -210,7 +231,7 @@ export default function HomePage() {
       });
 
 
-    supabase
+    sb
       .from("tasks")
       .select()
       .eq('user', session?.user.email || "NULL")
@@ -231,7 +252,7 @@ export default function HomePage() {
         }
       });
 
-    supabase
+    sb
       .from("drawntasks")
       .select()
       .eq('user', session?.user.email || "NULL")
@@ -300,13 +321,13 @@ export default function HomePage() {
   useEffect(() => {
     let isMounted = true;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    sb.auth.getSession().then(({ data: { session } }) => {
       if (isMounted) initializeStuff(session);
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = sb.auth.onAuthStateChange((_event, session) => {
       if (isMounted) initializeStuff(session);
     });
 
@@ -317,11 +338,11 @@ export default function HomePage() {
   }, []);
 
   async function saveDrawnTasks(user: string, task:string, points: number){
-    const { error } = await supabase.from('drawntasks').insert({ user: user, task: task, points: points});
+    const { error } = await sb.from('drawntasks').insert({ user: user, task: task, points: points});
   }
 
   async function deleteDrawnTasks(user: string){
-    const response = await supabase.from('drawntasks').delete().eq('user', user)
+    const response = await sb.from('drawntasks').delete().eq('user', user)
   }
 
   
@@ -332,7 +353,7 @@ export default function HomePage() {
     //   return;
     // }
 
-    const { error } = await supabase.from('hunts').update({ status: 0 }).eq('id', recentRunId);
+    const { error } = await sb.from('hunts').update({ status: 0 }).eq('id', recentRunId);
 
     location.reload();
   }
@@ -354,23 +375,23 @@ export default function HomePage() {
 
   async function upsertPoints(user: string, newPoints: number){
 
-    const { data, error } = await supabase.from('points').select().eq('user', user);
+    const { data, error } = await sb.from('points').select().eq('user', user);
     console.log("Data: ", data);
 
     let oldPoints = 0;
 
     if (!data || data.length === 0) {
-      const { error: insertError } = await supabase.from('points').insert({ user: user, points: 0 });
+      const { error: insertError } = await sb.from('points').insert({ user: user, points: 0 });
     } else {
       oldPoints = data[0].points;
     }
     
     // because we want to trigger the update subscription regardless
-    const { error: updateError } = await supabase.from('points').update({ points: (newPoints + oldPoints) }).eq('user', user);
+    const { error: updateError } = await sb.from('points').update({ points: (newPoints + oldPoints) }).eq('user', user);
   }
 
   async function saveTask(user: string, task: string, points: number, status: number){
-    const { error } = await supabase.from('tasks').insert({ user: user, task: task, points: points, status: status });
+    const { error } = await sb.from('tasks').insert({ user: user, task: task, points: points, status: status });
   }
 
   function completeChallenge() {
@@ -458,7 +479,7 @@ export default function HomePage() {
 
     let recentRunId = hunts[hunts.length - 1].id;
 
-    const { error } = await supabase.from('hunts').update({ status: 1 }).eq('id', recentRunId);
+    const { error } = await sb.from('hunts').update({ status: 1 }).eq('id', recentRunId);
     
     setTimeOutStatus(1);
 
@@ -475,13 +496,22 @@ export default function HomePage() {
     <>
       <div className="w-full bg-slate-800 dark:bg-[rgb(20,77,128)] text-white" style={{ height: "40px" }}>
         <h1 className="absolute l-0 m-2">Manhunt • {session?.user.email}</h1>
-        <Button
-          className="absolute right-0 top-0 h-6 bg-blue-400 dark:bg-slate-800 dark:text-slate-200"
-          style={{ height: "30px", margin: "5px" }}
-          onClick={() => { window.location.href = "/auth"; }}
-        >
-          Menu
-        </Button>
+        <div className="absolute right-0 top-0 flex gap-2 p-2">
+          <Button
+            className="h-6 bg-slate-600 dark:bg-slate-700 dark:text-slate-200"
+            style={{ height: "30px" }}
+            onClick={() => { window.location.href = "/map"; }}
+          >
+            Map
+          </Button>
+          <Button
+            className="h-6 bg-blue-400 dark:bg-slate-800 dark:text-slate-200"
+            style={{ height: "30px" }}
+            onClick={() => { window.location.href = "/auth"; }}
+          >
+            Menu
+          </Button>
+        </div>
       </div>
       {/* <h1 className="text-5xl font-bold pt-32">{String(hunts[hunts.length-1].id)}Jabari</h1> */}
       <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)] bg-stone-300 dark:bg-neutral-900">

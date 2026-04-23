@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-import supabase from "./../utils/supabase";
+import supabase, { hasSupabaseEnv } from "./../utils/supabase";
 
 import type { Session } from '@supabase/supabase-js'
 
@@ -27,6 +27,8 @@ export default function RealtimeStream({serverData} : {serverData: Hunt[]}) {
 
 
     useEffect(() => {
+        if (!hasSupabaseEnv || !supabase) return;
+
         supabase.channel("realtimestream:hunts-stream").on("postgres_changes", {
             event: "INSERT",
             schema: "public",
@@ -55,6 +57,8 @@ export default function RealtimeStream({serverData} : {serverData: Hunt[]}) {
 
     useEffect(() => {
         let isMounted = true;
+
+        if (!hasSupabaseEnv || !supabase) return;
 
         supabase.auth.getSession().then(({ data: { session } }) => {
             if (isMounted) setSession(session);

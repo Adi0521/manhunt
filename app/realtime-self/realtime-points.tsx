@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-import supabase from "../utils/supabase";
+import supabase, { hasSupabaseEnv } from "../utils/supabase";
 
 import type { Session } from '@supabase/supabase-js'
 
@@ -38,7 +38,10 @@ export default function PointsStreamSelf({ selfPoints, user, challenge, timeOutS
     }, [currentChallenge]);
 
     useEffect(() => {
-        const channel = supabase.channel("realtimestream:points-stream-self").on(
+        const sb = supabase;
+        if (!hasSupabaseEnv || !sb) return;
+
+        const channel = sb.channel("realtimestream:points-stream-self").on(
             "postgres_changes",
             {
                 event: "*",
@@ -65,7 +68,10 @@ export default function PointsStreamSelf({ selfPoints, user, challenge, timeOutS
     }, []);
 
     useEffect(() => {
-        const channel = supabase.channel("realtimestream:drawntasks-stream-self-self").on("postgres_changes", {
+        const sb = supabase;
+        if (!hasSupabaseEnv || !sb) return;
+
+        const channel = sb.channel("realtimestream:drawntasks-stream-self-self").on("postgres_changes", {
             event: "INSERT",
             schema: "public",
             table: "drawntasks"
@@ -85,7 +91,7 @@ export default function PointsStreamSelf({ selfPoints, user, challenge, timeOutS
         }).subscribe();
 
         return () => {
-            supabase.removeChannel(channel);
+            sb.removeChannel(channel);
         }
     }, []);
 

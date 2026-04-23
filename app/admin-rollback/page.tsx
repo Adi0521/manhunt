@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 
-import supabase from "../utils/supabase";
+import supabase, { hasSupabaseEnv } from "../utils/supabase";
 import type { Session } from '@supabase/supabase-js';
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,8 @@ export default function HomePage() {
     const [session, setSession] = useState<Session | null>(null)
     
       useEffect(() => {
+        if (!hasSupabaseEnv || !supabase) return;
+
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session)
             if (session && session.user.email != "skparab1@gmail.com"){
@@ -39,6 +41,11 @@ export default function HomePage() {
 
 
     async function handleSubmit(input1: string, input2: string) {
+        if (!hasSupabaseEnv || !supabase) {
+            alert("Supabase not configured.");
+            return;
+        }
+
         const splitRunners = input1.split(",");
 
         const splitHunters = input2.split(",");
@@ -53,12 +60,30 @@ export default function HomePage() {
     }
 
     async function terminate() {
+        if (!hasSupabaseEnv || !supabase) {
+            alert("Supabase not configured.");
+            return;
+        }
+
         const { error } = await supabase.from('hunts').insert({});
         alert("Hunt terminated");
     }
 
     return (
         <>
+            {(!hasSupabaseEnv || !supabase) ? (
+                <div className="min-h-screen bg-stone-300 dark:bg-neutral-900 text-slate-900 dark:text-slate-100">
+                    <div className="w-full bg-slate-800 text-white h-10 absolute t-0">
+                        <h1 className="absolute l-0 m-2">Manhunt • ADMIN</h1>
+                    </div>
+                    <div className="max-w-xl mx-auto mt-32 p-6 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700">
+                        <h2 className="text-xl font-semibold">Supabase not configured</h2>
+                        <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                            Set <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.
+                        </p>
+                    </div>
+                </div>
+            ) : null}
 
             <div className="w-full bg-slate-800 text-white h-10 absolute t-0">
                 <h1 className="absolute l-0 m-2">Manhunt • ADMIN</h1>

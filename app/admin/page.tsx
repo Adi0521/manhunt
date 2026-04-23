@@ -2,14 +2,17 @@ import { getUsers } from "../utils/supabase-auth";
 
 import UserList from "./userList";
 
-import supabase from "../utils/supabase";
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
     async function clientFetchUsers() {
-        let userListFinal = await getUsers();
-        console.log("jabari");
-        console.log(userListFinal);
-        return userListFinal;
+        try {
+            const userListFinal = await getUsers();
+            return userListFinal;
+        } catch (error) {
+            console.error(error);
+            return [];
+        }
     }
 
     let users = await clientFetchUsers();
