@@ -15,9 +15,11 @@ export default function UserList() {
     const [tab, setTab] = useState<"teams" | "adjustment" | "boundary">("teams");
     const [gameCode, setGameCode] = useState("");
     const [players, setPlayers] = useState<string[]>([]);
-    const [checkedAsHunter, setCheckedAsHunter] = useState<Set<string>>(new Set());
     const [hunts, setHunts] = useState<any[]>([]);
     const [everyonePoints, setEveryonePoints] = useState<[string, number][]>([]);
+    const [pairs, setPairs] = useState<any[]>([]);
+    const [runnerPairId, setRunnerPairId] = useState<number | null>(null);
+    const [assigningPlayer, setAssigningPlayer] = useState<string | null>(null);
 
     useEffect(() => {
         const admin = localStorage.getItem("mh_is_admin") === "true";
@@ -58,6 +60,21 @@ export default function UserList() {
     }, [gameCode]);
 
     useEffect(() => {
+        if (!gameCode || !hasSupabaseEnv || !supabase) return;
+        supabase.from("pairs").select().eq("game_code", gameCode).then(({ data }) => {
+            setPairs(data ?? []);
+        });
+        const channel = supabase.channel("pairs-admin")
+            .on("postgres_changes", { event: "*", schema: "public", table: "pairs" }, () => {
+                supabase!.from("pairs").select().eq("game_code", gameCode).then(({ data }) => {
+                    setPairs(data ?? []);
+                });
+            })
+            .subscribe();
+        return () => { supabase!.removeChannel(channel); };
+    }, [gameCode]);
+
+    useEffect(() => {
         getPoints();
     }, []);
 
@@ -78,7 +95,8 @@ export default function UserList() {
         setGameCode(code);
         localStorage.setItem("mh_admin_code", code);
         setPlayers([]);
-        setCheckedAsHunter(new Set());
+        setPairs([]);
+        setRunnerPairId(null);
         toast(`New code: ${code}`);
     }
 
@@ -88,25 +106,44 @@ export default function UserList() {
         localStorage.setItem("mh_admin_code", upper);
     }
 
-    function toggleHunter(name: string) {
-        setCheckedAsHunter((prev) => {
-            const next = new Set(prev);
-            if (next.has(name)) next.delete(name);
-            else next.add(name);
-            return next;
-        });
+    async function assignToTeam(pairId: number, player: string) {
+        if (!hasSupabaseEnv || !supabase) return;
+        await supabase.from("pairs").update({ third: player }).eq("id", pairId);
+        setAssigningPlayer(null);
+        toast(`${player} added to team.`);
+    }
+
+    async function removeFromTeam(pairId: number) {
+        if (!hasSupabaseEnv || !supabase) return;
+        await supabase.from("pairs").update({ third: null }).eq("id", pairId);
+        toast("Player removed from team.");
+    }
+
+    function pickRunnersRandomly() {
+        const confirmed = pairs.filter((p: any) => p.confirmed);
+        if (confirmed.length === 0) { toast("No confirmed pairs yet."); return; }
+        const pick = confirmed[Math.floor(Math.random() * confirmed.length)];
+        setRunnerPairId(pick.id);
+        toast(`Runners: ${pick.requester} & ${pick.partner}`);
     }
 
     async function startRun() {
         if (!hasSupabaseEnv || !supabase) { toast("Supabase not configured."); return; }
 
-        const runners = players.filter((p) => !checkedAsHunter.has(p));
-        const hunters = players.filter((p) => checkedAsHunter.has(p));
+        const confirmed = pairs.filter((p: any) => p.confirmed);
+        if (confirmed.length < 2) { toast("Need at least 2 confirmed pairs to start."); return; }
+        if (!runnerPairId) { toast("Pick a runner pair first (or use Pick Randomly)."); return; }
 
-        if (runners.length === 0 || hunters.length === 0) {
-            toast("Need at least one runner and one hunter.");
-            return;
-        }
+        const runnerPair = confirmed.find((p: any) => p.id === runnerPairId);
+        if (!runnerPair) { toast("Runner pair not found."); return; }
+
+        const pairMembers = (p: any) => [p.requester, p.partner, ...(p.third ? [p.third] : [])];
+        const runners = pairMembers(runnerPair);
+        const pairedSet = new Set(confirmed.flatMap(pairMembers));
+        const hunters = [
+            ...confirmed.filter((p: any) => p.id !== runnerPairId).flatMap(pairMembers),
+            ...players.filter((p) => !pairedSet.has(p)),
+        ];
 
         const { error } = await supabase.from("hunts").insert({ runners, hunters, code: gameCode });
         if (error) {
@@ -188,29 +225,84 @@ export default function UserList() {
                         <p className="text-xs text-slate-500">Share this code with players so they can join.</p>
                     </div>
 
-                    <div className="flex flex-col gap-2">
-                        <h2 className="text-xl text-center">Players ({players.length})</h2>
-                        <p className="text-xs text-center text-slate-500">Tap a player to toggle Hunter (green) / Runner.</p>
-                        {players.length === 0 ? (
-                            <p className="text-sm text-center text-slate-400 py-4">Waiting for players to join...</p>
-                        ) : (
-                            players.map((name) => {
-                                const isHunter = checkedAsHunter.has(name);
-                                return (
-                                    <div
-                                        key={name}
-                                        className={`p-3 rounded-md w-full text-center cursor-pointer transition-all duration-200 ${
-                                            isHunter ? "bg-green-400 dark:bg-green-500 text-black" : "bg-gray-200 dark:bg-gray-700"
-                                        }`}
-                                        onClick={() => toggleHunter(name)}
-                                    >
-                                        {name} — {isHunter ? "Hunter" : "Runner"}
+                    {(() => {
+                        const confirmed = pairs.filter((p: any) => p.confirmed);
+                        const pairMembers = (p: any) => [p.requester, p.partner, ...(p.third ? [p.third] : [])];
+                        const pairedSet = new Set(confirmed.flatMap(pairMembers));
+                        const unpaired = players.filter((p) => !pairedSet.has(p));
+                        return (
+                            <div className="flex flex-col gap-2">
+                                <h2 className="text-xl text-center">Pairs ({confirmed.length})</h2>
+                                <p className="text-xs text-center text-slate-500">
+                                    {assigningPlayer
+                                        ? `Tap a pair to add ${assigningPlayer} to it.`
+                                        : "Tap a pair to designate as Runners (red). All others become Hunters."}
+                                </p>
+                                {confirmed.length === 0 ? (
+                                    <p className="text-sm text-center text-slate-400 py-4">No pairs yet — players need to pair up in the lobby.</p>
+                                ) : (
+                                    confirmed.map((pair: any) => {
+                                        const isRunners = pair.id === runnerPairId;
+                                        const canAddThird = assigningPlayer && !pair.third;
+                                        const label = pairMembers(pair).join(" & ");
+                                        return (
+                                            <div key={pair.id} className="flex flex-col gap-1">
+                                                <div
+                                                    className={`p-3 rounded-md w-full text-center cursor-pointer transition-all duration-200 ${
+                                                        canAddThird
+                                                            ? "bg-blue-200 dark:bg-blue-800 ring-2 ring-blue-400"
+                                                            : isRunners
+                                                            ? "bg-rose-400 dark:bg-rose-500 text-black"
+                                                            : "bg-gray-200 dark:bg-gray-700"
+                                                    }`}
+                                                    onClick={() => {
+                                                        if (canAddThird) assignToTeam(pair.id, assigningPlayer!);
+                                                        else if (!assigningPlayer) setRunnerPairId(isRunners ? null : pair.id);
+                                                    }}
+                                                >
+                                                    {label} — {isRunners ? "Runners" : "Hunters"}
+                                                    {canAddThird && <span className="ml-2 text-blue-700 dark:text-blue-300 text-xs">(tap to add)</span>}
+                                                </div>
+                                                {pair.third && (
+                                                    <button
+                                                        className="text-xs text-slate-400 hover:text-red-500 text-center"
+                                                        onClick={() => removeFromTeam(pair.id)}
+                                                    >
+                                                        Remove {pair.third} from this team
+                                                    </button>
+                                                )}
+                                            </div>
+                                        );
+                                    })
+                                )}
+                                {unpaired.length > 0 && (
+                                    <div className="mt-2 flex flex-col gap-1">
+                                        <p className="text-xs text-center text-slate-500 mb-1">Unpaired players — tap to add to a team:</p>
+                                        {unpaired.map((p) => (
+                                            <div
+                                                key={p}
+                                                className={`p-2 rounded-md text-sm flex items-center justify-between cursor-pointer transition-all duration-200 ${
+                                                    assigningPlayer === p
+                                                        ? "bg-blue-200 dark:bg-blue-800 ring-2 ring-blue-400"
+                                                        : "bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
+                                                }`}
+                                                onClick={() => setAssigningPlayer(assigningPlayer === p ? null : p)}
+                                            >
+                                                <span>{p}</span>
+                                                <span className="text-xs text-slate-400">
+                                                    {assigningPlayer === p ? "tap a pair above ↑" : "+ add to team"}
+                                                </span>
+                                            </div>
+                                        ))}
                                     </div>
-                                );
-                            })
-                        )}
-                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
 
+                    <Button onClick={pickRunnersRandomly} className="bg-blue-500 hover:bg-blue-600 text-white">
+                        Pick Runners Randomly
+                    </Button>
                     <Button onClick={startRun}>Start Hunt</Button>
                     <Button onClick={terminate} className="bg-rose-500 hover:bg-rose-600 text-white">
                         Terminate current hunt

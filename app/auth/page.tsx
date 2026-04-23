@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import supabase, { hasSupabaseEnv } from "../utils/supabase";
-import { setPlayerName, setIsAdmin } from "../utils/player";
+import { setPlayerName, setIsAdmin, setGameCode } from "../utils/player";
 
 const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? "manhunt-admin";
 
@@ -30,6 +30,7 @@ export default function AuthPage() {
       .upsert({ name: trimName, game_code: trimCode }, { onConflict: "name,game_code" });
 
     setPlayerName(trimName);
+    setGameCode(trimCode);
     setIsAdmin(false);
     window.location.href = "/";
   }
