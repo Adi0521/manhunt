@@ -1,381 +1,275 @@
 "use client"
 
-
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 
 import supabase, { hasSupabaseEnv } from "../utils/supabase";
-// import adminAuthClient from "../utils/supabase-auth";
-import type { Session } from '@supabase/supabase-js';
-
+import { generateCode } from "../utils/player";
 import { Button } from "@/components/ui/button";
-
 import { toast } from "sonner";
 
 const BoundaryMapClient = dynamic(() => import("./BoundaryMapClient"), { ssr: false });
 
-type UserListProps = {
-    users: string[];
-};
-
-export default function UserList({ users }: UserListProps) {
-
-    const [session, setSession] = useState<Session | null>(null)
-
-    const [hunts, setHunts] = useState<any[]>([]);
-
+export default function UserList() {
+    const [isAdmin, setIsAdmin] = useState(false);
     const [tab, setTab] = useState<"teams" | "adjustment" | "boundary">("teams");
-
+    const [gameCode, setGameCode] = useState("");
+    const [players, setPlayers] = useState<string[]>([]);
+    const [checkedAsHunter, setCheckedAsHunter] = useState<Set<string>>(new Set());
+    const [hunts, setHunts] = useState<any[]>([]);
     const [everyonePoints, setEveryonePoints] = useState<[string, number][]>([]);
 
     useEffect(() => {
-        if (!hasSupabaseEnv || !supabase) return;
-
-        supabase
-            .from("hunts")
-            .select()
-            .then(async ({ data }) => {
-                const datasorted = data?.sort((a, b) => {
-                    if (!a.id || !b.id) {
-                        return 0;
-                    }
-                    return a.id - b.id;
-                });
-
-                setHunts(datasorted ?? []);
-            });
+        const admin = localStorage.getItem("mh_is_admin") === "true";
+        if (!admin) { window.location.href = "/auth"; return; }
+        setIsAdmin(true);
+        const saved = localStorage.getItem("mh_admin_code") ?? "";
+        setGameCode(saved);
     }, []);
 
     useEffect(() => {
-    if (!hasSupabaseEnv || !supabase) return;
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-        setSession(session)
-    })
-
-    const {
-        data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-        setSession(session);
-    })
-
-    return () => subscription.unsubscribe()
-    }, [])
-
-    // useEffect(() => {
-    //     async function fetchUsers() {
-    //         const users = await getUsers();
-    //         setUserList(users);
-    //     }
-    //     fetchUsers();
-    // }, []);
-
-    async function getPoints() {
         if (!hasSupabaseEnv || !supabase) return;
-
-        supabase
-        .from("points")
-        .select("user, points")
-        .then(({ data, error }) => {
-            if (error) {
-            console.error("Error fetching points:", error);
-            }
-            console.log("Data37: ", data);
-
-            if (data && data.length > 0) {
-            const sortedData = data
-                .slice()
-                .sort((a: any, b: any) => a.user.localeCompare(b.user));
-            setEveryonePoints(sortedData.map((item: any) => [item.user, item.points]));
-            } else {
-            setEveryonePoints([]);
-            }
+        supabase.from("hunts").select().then(({ data }) => {
+            const sorted = data?.sort((a, b) => a.id - b.id) ?? [];
+            setHunts(sorted);
         });
-    }
+    }, []);
+
+    useEffect(() => {
+        if (!gameCode || !hasSupabaseEnv || !supabase) return;
+
+        supabase.from("players").select("name").eq("game_code", gameCode).then(({ data }) => {
+            if (data) setPlayers(data.map((p: any) => p.name));
+        });
+
+        const channel = supabase
+            .channel("players-admin")
+            .on("postgres_changes", { event: "*", schema: "public", table: "players" }, (payload) => {
+                if (payload.eventType === "INSERT" && (payload.new as any).game_code === gameCode) {
+                    setPlayers((prev) => prev.includes((payload.new as any).name) ? prev : [...prev, (payload.new as any).name]);
+                }
+                if (payload.eventType === "DELETE") {
+                    setPlayers((prev) => prev.filter((p) => p !== (payload.old as any).name));
+                }
+            })
+            .subscribe();
+
+        return () => { supabase!.removeChannel(channel); };
+    }, [gameCode]);
 
     useEffect(() => {
         getPoints();
     }, []);
 
-    // console.log(getUsers());
-    // clientFetchUsers();
-
-
-    async function startRun(runners : string[], hunters: string[]) {
-        if (!hasSupabaseEnv || !supabase) {
-            toast("Supabase not configured.");
-            return;
-        }
-
-        if (runners.length == 0 || hunters.length == 0) {
-            toast("Please select at least one runner and one hunter");
-            return;
-        }
-
-        const { error } = await supabase.from('hunts').insert({ runners, hunters});
-        if (error) {
-            console.error(error);
-        } else {
-            toast("Hunt started");
-        }
-
-        supabase
-            .from("hunts")
-            .select()
-            .then(async ({ data }) => {
-                const datasorted = data?.sort((a, b) => {
-                    if (!a.id || !b.id) {
-                        return 0;
-                    }
-                    return a.id - b.id;
-                });
-
-                setHunts(datasorted ?? []);
-            });
+    async function getPoints() {
+        if (!hasSupabaseEnv || !supabase) return;
+        supabase.from("points").select("user, points").then(({ data }) => {
+            if (data && data.length > 0) {
+                const sorted = [...data].sort((a: any, b: any) => a.user.localeCompare(b.user));
+                setEveryonePoints(sorted.map((item: any) => [item.user, item.points]));
+            } else {
+                setEveryonePoints([]);
+            }
+        });
     }
 
-    async function handleSubmit() {
+    function handleNewCode() {
+        const code = generateCode();
+        setGameCode(code);
+        localStorage.setItem("mh_admin_code", code);
+        setPlayers([]);
+        setCheckedAsHunter(new Set());
+        toast(`New code: ${code}`);
+    }
 
-        let runnersArray = [];
-        let huntersArray = [];
+    function handleCodeChange(val: string) {
+        const upper = val.toUpperCase().slice(0, 8);
+        setGameCode(upper);
+        localStorage.setItem("mh_admin_code", upper);
+    }
 
-        let i = 0;
-        while (i < users.length) {
-            const checkElement = document.getElementById("checkbox"+users[i]);
-            const divElement = document.getElementById("div"+users[i]);
+    function toggleHunter(name: string) {
+        setCheckedAsHunter((prev) => {
+            const next = new Set(prev);
+            if (next.has(name)) next.delete(name);
+            else next.add(name);
+            return next;
+        });
+    }
 
-            if (!(checkElement as HTMLInputElement)?.checked){
-                runnersArray.push(users[i]);
-                    
-                divElement?.classList.remove("bg-green-200");
-                divElement?.classList.add("bg-gray-200");
-                divElement?.classList.remove("dark:bg-green-400");
-                divElement?.classList.add("dark:bg-gray-800");
-                
-                (checkElement as HTMLInputElement).checked = true;
+    async function startRun() {
+        if (!hasSupabaseEnv || !supabase) { toast("Supabase not configured."); return; }
 
-            } else {
-                huntersArray.push(users[i]);
-            }
-            i++;
+        const runners = players.filter((p) => !checkedAsHunter.has(p));
+        const hunters = players.filter((p) => checkedAsHunter.has(p));
+
+        if (runners.length === 0 || hunters.length === 0) {
+            toast("Need at least one runner and one hunter.");
+            return;
         }
 
-        startRun(runnersArray, huntersArray);
+        const { error } = await supabase.from("hunts").insert({ runners, hunters, code: gameCode });
+        if (error) {
+            console.error(error);
+            toast("Failed to start hunt.");
+        } else {
+            toast("Hunt started!");
+            supabase.from("hunts").select().then(({ data }) => {
+                const sorted = data?.sort((a, b) => a.id - b.id) ?? [];
+                setHunts(sorted);
+            });
+        }
     }
 
     async function terminate() {
-        if (!hasSupabaseEnv || !supabase) {
-            toast("Supabase not configured.");
-            return;
-        }
-
-        if (hunts[hunts.length - 1].runners){
-            toast("Hunt terminated");
-            
-            const { error } = await supabase.from('hunts').insert({});
-            setHunts((prev : any) => [...prev, { id: null, runners: null, hunters: null, created_at: null }]);
+        if (!hasSupabaseEnv || !supabase) { toast("Supabase not configured."); return; }
+        const latest = hunts[hunts.length - 1];
+        if (latest?.runners) {
+            await supabase.from("hunts").insert({});
+            setHunts((prev) => [...prev, { id: null, runners: null, hunters: null, created_at: null }]);
+            toast("Hunt terminated.");
         } else {
-            toast("Hunt already terminated; no effect")
+            toast("Hunt already terminated.");
         }
     }
 
-    function handleHighlight(id: string) {
-        console.log("highlighting",id);
-        const checkElement = document.getElementById("checkbox"+id);
-        const divElement = document.getElementById("div"+id);
-        if ((checkElement as HTMLInputElement)?.checked){
-
-            divElement?.classList.remove("bg-gray-200");
-            divElement?.classList.remove("dark:bg-gray-800");
-            divElement?.classList.add("dark:bg-green-400");
-            divElement?.classList.add("bg-green-400");
-
-            (checkElement as HTMLInputElement).checked = false;
-        } else {
-            divElement?.classList.remove("dark:bg-green-400");
-            divElement?.classList.remove("bg-green-400");
-            divElement?.classList.add("bg-gray-200");
-            divElement?.classList.add("dark:bg-gray-800");
-
-            (checkElement as HTMLInputElement).checked = true;
-        }
-    }
-
-
-    async function modPoints(adjustment: number, user: string, prevpoints: number){
+    async function modPoints(adjustment: number, user: string, prevpoints: number) {
         if (!hasSupabaseEnv || !supabase) return;
-
-        const { error } = await supabase
-            .from("points")
-            .update({ points: (prevpoints as number) + adjustment })
-            .eq("user", user);
-        if (!error) getPoints();
+        await supabase.from("points").update({ points: prevpoints + adjustment }).eq("user", user);
+        getPoints();
     }
 
+    if (!isAdmin) return null;
+
+    const activeHuntId = hunts.length > 0 && hunts[hunts.length - 1]?.runners ? hunts[hunts.length - 1].id : null;
 
     return (
-        <>
-            {(!hasSupabaseEnv || !supabase) ? (
-                <div className="rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700 p-6">
-                    <h2 className="text-xl font-semibold">Supabase not configured</h2>
-                    <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-                        Set <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.
-                    </p>
-                </div>
-            ) : null}
-            {(session && session.user.email == "skparab1@gmail.com") ? (
-            <>
-                <div className="flex flex-col gap-4">
-                    <div className="flex mb-4 bg-gray-200 dark:bg-gray-800 rounded-lg overflow-hidden">
-                        <button
-                            className={`flex-1 px-4 py-2 transition-colors duration-200 focus:outline-none ${
-                                tab === "teams"
-                                    ? "bg-gray-300 dark:bg-green-400 text-black font-bold"
-                                    : "text-gray-500"
-                            }`}
-                            onClick={() => setTab("teams")}
-                        >
-                            Teams
-                        </button>
-                        <button
-                            className={`flex-1 px-4 py-2 transition-colors duration-200 focus:outline-none ${
-                                tab === "adjustment"
-                                    ? "bg-gray-300 dark:bg-green-400 text-black font-bold"
-                                    : "text-gray-500"
-                            }`}
-                            onClick={() => setTab("adjustment")}
-                        >
-                            Adjustment
-                        </button>
-                        <button
-                            className={`flex-1 px-4 py-2 transition-colors duration-200 focus:outline-none ${
-                                tab === "boundary"
-                                    ? "bg-gray-300 dark:bg-green-400 text-black font-bold"
-                                    : "text-gray-500"
-                            }`}
-                            onClick={() => setTab("boundary")}
-                        >
-                            Boundary
-                        </button>
+        <div className="flex flex-col gap-4 w-full max-w-md">
+            <div className="flex bg-gray-200 dark:bg-gray-800 rounded-lg overflow-hidden">
+                {(["teams", "adjustment", "boundary"] as const).map((t) => (
+                    <button
+                        key={t}
+                        className={`flex-1 px-4 py-2 capitalize transition-colors duration-200 focus:outline-none ${
+                            tab === t ? "bg-gray-300 dark:bg-green-400 text-black font-bold" : "text-gray-500"
+                        }`}
+                        onClick={() => setTab(t)}
+                    >
+                        {t}
+                    </button>
+                ))}
+            </div>
+
+            {tab === "teams" && (
+                <>
+                    <div className="flex flex-col gap-2 bg-gray-100 dark:bg-gray-800 p-4 rounded-xl">
+                        <h2 className="font-semibold">Game Code</h2>
+                        <div className="flex gap-2 items-center">
+                            <input
+                                className="flex-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-lg font-mono uppercase tracking-widest"
+                                value={gameCode}
+                                onChange={(e) => handleCodeChange(e.target.value)}
+                                placeholder="XXXXXX"
+                                maxLength={8}
+                            />
+                            <button
+                                className="px-3 py-2 rounded-lg bg-blue-500 text-white text-sm"
+                                onClick={handleNewCode}
+                            >
+                                Generate
+                            </button>
+                            <button
+                                className="px-3 py-2 rounded-lg bg-slate-300 dark:bg-slate-600 text-sm"
+                                onClick={() => { navigator.clipboard.writeText(gameCode); toast("Copied!"); }}
+                                disabled={!gameCode}
+                            >
+                                Copy
+                            </button>
+                        </div>
+                        <p className="text-xs text-slate-500">Share this code with players so they can join.</p>
                     </div>
 
-                    {tab === "teams" && (
-                        <>
-                            <div className="flex flex-col gap-2">
-                                <h1 className="text-2xl text-center">Select Runners</h1>
-                                {users.map((user: string) => (
-                                    <div key={user} id={"div"+user} className="bg-gray-200 p-2 rounded-md w-full transition-all duration-200 text-center dark:bg-gray-800" onClick={() => handleHighlight(user)}>
-                                        <input
-                                            id={"checkbox"+user}
-                                            type="checkbox"
-                                            className="m-2 hidden"
-                                            onChange={() => handleHighlight(user)}
-                                            defaultChecked
-                                        />
-                                        <label>{user}</label>
+                    <div className="flex flex-col gap-2">
+                        <h2 className="text-xl text-center">Players ({players.length})</h2>
+                        <p className="text-xs text-center text-slate-500">Tap a player to toggle Hunter (green) / Runner.</p>
+                        {players.length === 0 ? (
+                            <p className="text-sm text-center text-slate-400 py-4">Waiting for players to join...</p>
+                        ) : (
+                            players.map((name) => {
+                                const isHunter = checkedAsHunter.has(name);
+                                return (
+                                    <div
+                                        key={name}
+                                        className={`p-3 rounded-md w-full text-center cursor-pointer transition-all duration-200 ${
+                                            isHunter ? "bg-green-400 dark:bg-green-500 text-black" : "bg-gray-200 dark:bg-gray-700"
+                                        }`}
+                                        onClick={() => toggleHunter(name)}
+                                    >
+                                        {name} — {isHunter ? "Hunter" : "Runner"}
                                     </div>
-                                ))}
-                            </div>
+                                );
+                            })
+                        )}
+                    </div>
 
-                            <Button onClick={() => handleSubmit()}>
-                                Start Hunt
-                            </Button>
-
-                            <Button onClick={() => terminate()}>
-                                Terminate current hunt
-                            </Button>
-
-                            <div className="flex flex-col gap-2">
-                                <h1 className="text-2xl text-center">Previous Hunts</h1>
-                                {[...hunts].reverse().map((hunt: any) => (
-                                    (hunt.runners && (
-                                        <div
-                                            key={hunt.id}
-                                            className={`p-2 rounded-md w-full text-center ${
-                                                hunt.id === hunts[hunts.length - 1]?.id ? "bg-green-400" : "bg-gray-400"
-                                            }`}
-                                        >
-                                            <h2 className="font-bold">Runners:</h2>
-                                            <ul>
-                                                {hunt.runners?.map((runner: string) => (
-                                                    <li key={runner}>{runner}</li>
-                                                ))}
-                                            </ul>
-                                            <h2 className="font-bold mt-2">Hunters:</h2>
-                                            <ul>
-                                                {hunt.hunters?.map((hunter: string) => (
-                                                    <li key={hunter}>{hunter}</li>
-                                                ))}
-                                            </ul>
-                                            <h2 className="font-bold mt-2 mb-2">{new Date(hunt.created_at).toLocaleString()}</h2>
-                                            <Button onClick={() => startRun(hunt.runners || [], hunt.hunters || [])}>
-                                                Run again
-                                            </Button>
-                                        </div>
-                                    ))
-                                ))}
-                            </div>
-                        </>
-                    )}
-
-                    {tab === "adjustment" && (
-                        <div className="flex flex-col gap-4 items-center">
-                            <div className="flex flex-col gap-2">
-                            <h1 className="text-2xl text-center">Points Adjustment</h1>
-                            {everyonePoints.map(([user, points]) => (
-                                <div
-                                    key={user}
-                                    className="flex items-center justify-between bg-gray-100 dark:bg-gray-700 p-2 rounded w-full"
-                                >
-                                    <span>{user}</span>
-                                    <div className="flex items-center gap-2 ml-4">
-                                        <button
-                                            className="px-2 py-1 rounded bg-red-200 dark:bg-red-600 text-black dark:text-white"
-                                            onClick={async () => { modPoints(-1, user, points) }}
-                                        >
-                                            -
-                                        </button>
-                                        <span className="px-2">{points}</span>
-                                        <button
-                                            className="px-2 py-1 rounded bg-green-200 dark:bg-green-600 text-black dark:text-white"
-                                            onClick={async () => { modPoints(1, user, points) }}
-                                        >
-                                            +
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {tab === "boundary" && (
-                        <div className="flex flex-col gap-2">
-                            <h1 className="text-2xl text-center">Set Play Boundary</h1>
-                            <p className="text-sm text-center text-gray-500 dark:text-gray-400 mb-2">
-                                Draw the area players must stay within. Saved to the current active hunt.
-                            </p>
-                            <BoundaryMapClient
-                                huntId={hunts.length > 0 && hunts[hunts.length - 1]?.runners ? hunts[hunts.length - 1].id : null}
-                            />
-                        </div>
-                    )}
-                </div>
-            </>
-            ) : !session ? (
-                <div className="flex flex-col gap-2">
-                    <h1 className="text-2xl">Authenticating...</h1>
-                </div>
-            ) : (
-                <div className="flex flex-col gap-2">
-                    <h1 className="text-2xl text-center">You don't have access to this mang</h1>
-                    <h1 className="text-2xl text-center">Please contact Jabari</h1>
-                    <Button>
-                        <a href="/">Forgive me, get me out of this</a>
+                    <Button onClick={startRun}>Start Hunt</Button>
+                    <Button onClick={terminate} className="bg-rose-500 hover:bg-rose-600 text-white">
+                        Terminate current hunt
                     </Button>
+
+                    <div className="flex flex-col gap-2">
+                        <h1 className="text-2xl text-center">Previous Hunts</h1>
+                        {[...hunts].reverse().map((hunt: any) =>
+                            hunt.runners ? (
+                                <div
+                                    key={hunt.id}
+                                    className={`p-2 rounded-md w-full text-center ${
+                                        hunt.id === hunts[hunts.length - 1]?.id ? "bg-green-400" : "bg-gray-400"
+                                    }`}
+                                >
+                                    {hunt.code && <p className="text-sm font-mono font-bold">Code: {hunt.code}</p>}
+                                    <h2 className="font-bold">Runners:</h2>
+                                    <ul>{hunt.runners.map((r: string) => <li key={r}>{r}</li>)}</ul>
+                                    <h2 className="font-bold mt-2">Hunters:</h2>
+                                    <ul>{hunt.hunters?.map((h: string) => <li key={h}>{h}</li>)}</ul>
+                                    <h2 className="font-bold mt-2 mb-2">{new Date(hunt.created_at).toLocaleString()}</h2>
+                                </div>
+                            ) : null
+                        )}
+                    </div>
+                </>
+            )}
+
+            {tab === "adjustment" && (
+                <div className="flex flex-col gap-4 items-center">
+                    <h1 className="text-2xl text-center">Points Adjustment</h1>
+                    {everyonePoints.map(([user, points]) => (
+                        <div key={user} className="flex items-center justify-between bg-gray-100 dark:bg-gray-700 p-2 rounded w-full">
+                            <span>{user}</span>
+                            <div className="flex items-center gap-2 ml-4">
+                                <button
+                                    className="px-2 py-1 rounded bg-red-200 dark:bg-red-600 text-black dark:text-white"
+                                    onClick={() => modPoints(-1, user, points)}
+                                >-</button>
+                                <span className="px-2">{points}</span>
+                                <button
+                                    className="px-2 py-1 rounded bg-green-200 dark:bg-green-600 text-black dark:text-white"
+                                    onClick={() => modPoints(1, user, points)}
+                                >+</button>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             )}
-        </>
+
+            {tab === "boundary" && (
+                <div className="flex flex-col gap-2">
+                    <h1 className="text-2xl text-center">Set Play Boundary</h1>
+                    <p className="text-sm text-center text-gray-500 dark:text-gray-400 mb-2">
+                        Draw the area players must stay within.
+                    </p>
+                    <BoundaryMapClient huntId={activeHuntId} />
+                </div>
+            )}
+        </div>
     );
 }
-

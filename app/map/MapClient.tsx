@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleMarker, MapContainer, Polygon, Popup, TileLayer, useMapEvents } from "react-leaflet";
 import type { LeafletMouseEvent } from "leaflet";
 import supabase, { hasSupabaseEnv } from "../utils/supabase";
-import type { Session } from "@supabase/supabase-js";
 
 type Point = [number, number];
 
@@ -35,7 +34,7 @@ function pointInPolygon(point: Point, polygon: Point[]): boolean {
 }
 
 export default function MapClient() {
-  const [session, setSession] = useState<Session | null>(null);
+  const [playerName, setPlayerName] = useState<string>("");
   const [currentLocation, setCurrentLocation] = useState<Point | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [boundary, setBoundary] = useState<Point[]>([]);
@@ -45,10 +44,9 @@ export default function MapClient() {
   const locationRef = useRef<Point | null>(null);
 
   useEffect(() => {
-    if (!hasSupabaseEnv || !supabase) return;
-    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setSession(s));
-    return () => subscription.unsubscribe();
+    const name = localStorage.getItem("mh_name");
+    if (!name) { window.location.href = "/auth"; return; }
+    setPlayerName(name);
   }, []);
 
   useEffect(() => {
@@ -117,17 +115,16 @@ export default function MapClient() {
   }, []);
 
   useEffect(() => {
-    if (!session?.user.email || !hasSupabaseEnv || !supabase) return;
-    const email = session.user.email;
+    if (!playerName || !hasSupabaseEnv || !supabase) return;
     const interval = setInterval(async () => {
       const loc = locationRef.current;
       if (!loc) return;
       await supabase!
         .from("locations")
-        .upsert({ user: email, lat: loc[0], lng: loc[1], updated_at: new Date().toISOString() }, { onConflict: "user" });
+        .upsert({ user: playerName, lat: loc[0], lng: loc[1], updated_at: new Date().toISOString() }, { onConflict: "user" });
     }, 5000);
     return () => clearInterval(interval);
-  }, [session]);
+  }, [playerName]);
 
   const mapCenter = useMemo(() => currentLocation ?? [51.505, -0.09], [currentLocation]);
 
@@ -156,12 +153,12 @@ export default function MapClient() {
   }
 
   const allPlayers = useMemo(() => {
-    if (!session?.user.email) return players;
-    if (players.some((p) => p.user === session.user.email)) return players;
+    if (!playerName) return players;
+    if (players.some((p) => p.user === playerName)) return players;
     return currentLocation
-      ? [...players, { user: session.user.email, lat: currentLocation[0], lng: currentLocation[1] }]
+      ? [...players, { user: playerName, lat: currentLocation[0], lng: currentLocation[1] }]
       : players;
-  }, [players, session, currentLocation]);
+  }, [players, playerName, currentLocation]);
 
   return (
     <div className="min-h-screen bg-stone-200 dark:bg-neutral-950 text-slate-900 dark:text-slate-100">
@@ -203,7 +200,7 @@ export default function MapClient() {
               )}
 
               {allPlayers.map((p) => {
-                const isSelf = p.user === session?.user.email;
+                const isSelf = p.user === playerName;
                 const color = isSelf ? "#1d4ed8" : playerColor(p.user);
                 const fill = isSelf ? "#60a5fa" : playerColor(p.user);
                 return (
@@ -247,7 +244,7 @@ export default function MapClient() {
                 <div className="rounded-2xl bg-slate-100 dark:bg-slate-800 p-4">
                   <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Your role</div>
                   <div className="mt-2 text-base font-medium">
-                    {session ? playerRole(session.user.email!) : "—"}
+                    {playerName ? playerRole(playerName) : "—"}
                   </div>
                 </div>
               </div>
@@ -262,7 +259,7 @@ export default function MapClient() {
                   </div>
                 ) : (
                   allPlayers.map((p) => {
-                    const isSelf = p.user === session?.user.email;
+                    const isSelf = p.user === playerName;
                     const color = isSelf ? "#1d4ed8" : playerColor(p.user);
                     return (
                       <div

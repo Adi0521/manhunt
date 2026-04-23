@@ -1,123 +1,120 @@
-"use client"
+"use client";
 
-import * as React from 'react';
-import { useState, useEffect } from 'react';
-// import './index.css'
-
-import { Button } from "@/components/ui/button"
-
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import supabase, { hasSupabaseEnv } from "../utils/supabase";
+import { setPlayerName, setIsAdmin } from "../utils/player";
 
-import Image from 'next/image';
-
-import type { Session } from '@supabase/supabase-js'
-import { Auth } from '@supabase/auth-ui-react'
-import { ThemeSupa } from '@supabase/auth-ui-shared'
-import evilSpongebobGif from '../evil-spongebob-ezgif.com-video-to-gif-converter.gif';
+const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? "manhunt-admin";
 
 export default function AuthPage() {
-  
-  const [session, setSession] = useState<Session | null>(null)
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [adminPw, setAdminPw] = useState("");
 
-  const sb = supabase;
+  async function handleJoin() {
+    const trimName = name.trim();
+    const trimCode = code.trim().toUpperCase();
+    if (!trimName) { setError("Enter your name."); return; }
+    if (!trimCode) { setError("Enter a game code."); return; }
+    if (!hasSupabaseEnv || !supabase) { setError("App not configured."); return; }
 
-  useEffect(() => {
-    if (!hasSupabaseEnv || !sb) return;
+    setLoading(true);
+    setError(null);
 
-    sb.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-    })
+    await supabase
+      .from("players")
+      .upsert({ name: trimName, game_code: trimCode }, { onConflict: "name,game_code" });
 
-    const {
-      data: { subscription },
-    } = sb.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-
-  if (!hasSupabaseEnv || !sb) {
-    return (
-      <div className="min-h-screen bg-stone-300 dark:bg-neutral-900 text-slate-900 dark:text-slate-100">
-        <div className="w-full bg-slate-800 dark:bg-[rgb(20,77,128)] text-white" style={{ height: "40px" }}>
-          <h1 className="absolute l-0 m-2">Manhunt</h1>
-        </div>
-        <div className="max-w-xl mx-auto mt-32 p-6 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700">
-          <h2 className="text-xl font-semibold">Supabase not configured</h2>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-            Set <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to use auth.
-          </p>
-        </div>
-      </div>
-    );
+    setPlayerName(trimName);
+    setIsAdmin(false);
+    window.location.href = "/";
   }
 
-  if (!session) {
-    return (
-      <div className='text-center ml-1/2 bg-stone-300 dark:bg-neutral-900'>
+  function handleAdminLogin() {
+    if (adminPw === ADMIN_PASSWORD) {
+      setPlayerName("Admin");
+      setIsAdmin(true);
+      window.location.href = "/admin";
+    } else {
+      setError("Wrong password.");
+    }
+  }
 
-        <div className="w-full bg-slate-800 dark:bg-[rgb(20,77,128)] text-white" style={{ height: "40px" }}>
-          <h1 className="absolute l-0 m-2">Manhunt</h1>
-        </div>
-        <div className="w-1/2 ml-[25%] mt-32">
-          <Auth
-            supabaseClient={sb}
-            appearance={{
-              theme: ThemeSupa,
-              variables: {
-                default: {
-                  colors: {
-                    brand: '#1e293b',
-                    brandAccent: '#1e293b',
-                    brandButtonText: 'white',
-                    inputBorder: '#1e293b',
-                    inputBackground: 'aliceblue',
-                  },
-                },
-              }, 
-            }}
-            providers={[]}
-          />
-        </div>
+  return (
+    <div className="min-h-screen bg-stone-300 dark:bg-neutral-900 text-slate-900 dark:text-slate-100">
+      <div className="w-full bg-slate-800 dark:bg-[rgb(20,77,128)] text-white h-10 flex items-center px-4">
+        <h1>Manhunt</h1>
       </div>
-    )
-  } else {
-    // console.log(session);
-    // location.href = "/";
 
-    return (
-      <div className='text-center ml-1/2 bg-stone-300 dark:bg-neutral-900'>
+      <div className="max-w-sm mx-auto mt-24 flex flex-col gap-4">
+        {!showAdmin ? (
+          <div className="p-6 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700 flex flex-col gap-4">
+            <h2 className="text-2xl font-semibold text-center">Join Game</h2>
 
-        <div className="w-full bg-slate-800 dark:bg-[rgb(20,77,128)] text-white" style={{ height: "40px" }}>
-          <h1 className="absolute l-0 m-2">Manhunt • {session?.user.email}</h1>
-        </div>
-        
-        <div className="flex flex-col items-center space-y-4 mt-8">
-            <div className="p-8 m-4 rounded shadow flex flex-col items-center space-y-4 w-full max-w-xl">
-            <Button className="bg-slate-400 text-center">Hello, {session.user.email}</Button>
-            
-            <Image
-              src={evilSpongebobGif}
-              alt="Evil Spongebob"
-              width={300}
-              height={200}
-              style={{ display: "inline-block" }}
-            />
-
-            <div className="flex flex-row space-x-4 mt-1">
-              <Button className="bg-blue-400" onClick={() => { window.location.href = "/"; }}>Go to Manhunt</Button>
-              <Button onClick={() => { window.location.href = "/admin"; }}>Admin</Button>
-              <Button className='bg-green-400' onClick={async () => {
-              const { error } = await sb.auth.signOut()
-              if (error) console.log('Error logging out:', error.message)
-              else console.log('Logged out successfully')
-              }}>Logout</Button>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm text-slate-600 dark:text-slate-400">Your name</label>
+              <input
+                className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
+                placeholder="e.g. Jabari"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+              />
             </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-sm text-slate-600 dark:text-slate-400">Game code</label>
+              <input
+                className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono uppercase tracking-widest"
+                placeholder="ABC123"
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                maxLength={8}
+                onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+              />
+            </div>
+
+            {error && <p className="text-sm text-rose-500">{error}</p>}
+
+            <Button onClick={handleJoin} disabled={loading}>
+              {loading ? "Joining…" : "Join"}
+            </Button>
+
+            <button
+              className="text-xs text-slate-400 hover:text-slate-600 text-center mt-1"
+              onClick={() => { setShowAdmin(true); setError(null); }}
+            >
+              Admin access
+            </button>
           </div>
-        </div>
+        ) : (
+          <div className="p-6 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700 flex flex-col gap-4">
+            <h2 className="text-2xl font-semibold text-center">Admin Login</h2>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm text-slate-600 dark:text-slate-400">Password</label>
+              <input
+                type="password"
+                className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
+                value={adminPw}
+                onChange={(e) => setAdminPw(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAdminLogin()}
+              />
+            </div>
+            {error && <p className="text-sm text-rose-500">{error}</p>}
+            <Button onClick={handleAdminLogin}>Enter</Button>
+            <button
+              className="text-xs text-slate-400 hover:text-slate-600 text-center"
+              onClick={() => { setShowAdmin(false); setError(null); }}
+            >
+              Back to join
+            </button>
+          </div>
+        )}
       </div>
-    )
-  }
+    </div>
+  );
 }
