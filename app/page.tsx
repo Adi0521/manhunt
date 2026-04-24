@@ -66,14 +66,28 @@ export default function HomePage() {
     setPlayerName(name);
 
     const code = getGameCode() ?? "";
-    setPlayerGameCode(code);
 
-    if (code) {
-      sb.from("players").select("name").eq("game_code", code).then(({ data }) => {
+    function loadLobbyData(c: string) {
+      sb.from("players").select("name").eq("game_code", c).then(({ data }) => {
         setLobbyPlayers(data?.map((p: any) => p.name) ?? []);
       });
-      sb.from("pairs").select().eq("game_code", code).then(({ data }) => {
+      sb.from("pairs").select().eq("game_code", c).then(({ data }) => {
         setPairs(data ?? []);
+      });
+    }
+
+    if (code) {
+      setPlayerGameCode(code);
+      loadLobbyData(code);
+    } else {
+      // mh_game_code missing from localStorage — look it up from the players table
+      sb.from("players").select("game_code").eq("name", name).maybeSingle().then(({ data }) => {
+        const fetchedCode = data?.game_code ?? "";
+        if (fetchedCode) {
+          localStorage.setItem("mh_game_code", fetchedCode);
+          setPlayerGameCode(fetchedCode);
+          loadLobbyData(fetchedCode);
+        }
       });
     }
 
