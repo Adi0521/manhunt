@@ -20,6 +20,8 @@ export default function UserList() {
     const [pairs, setPairs] = useState<any[]>([]);
     const [runnerPairId, setRunnerPairId] = useState<number | null>(null);
     const [assigningPlayer, setAssigningPlayer] = useState<string | null>(null);
+    const [winPoints, setWinPoints] = useState<number>(15);
+    const [rotationMinutes, setRotationMinutes] = useState<number>(30);
 
     useEffect(() => {
         const admin = localStorage.getItem("mh_is_admin") === "true";
@@ -35,6 +37,15 @@ export default function UserList() {
             const sorted = data?.sort((a, b) => a.id - b.id) ?? [];
             setHunts(sorted);
         });
+        const channel = supabase.channel("hunts-admin-updates")
+            .on("postgres_changes", { event: "UPDATE", schema: "public", table: "hunts" }, () => {
+                supabase!.from("hunts").select().then(({ data }) => {
+                    const sorted = data?.sort((a, b) => a.id - b.id) ?? [];
+                    setHunts(sorted);
+                });
+            })
+            .subscribe();
+        return () => { supabase!.removeChannel(channel); };
     }, []);
 
     useEffect(() => {
@@ -145,7 +156,7 @@ export default function UserList() {
             ...players.filter((p) => !pairedSet.has(p)),
         ];
 
-        const { error } = await supabase.from("hunts").insert({ runners, hunters, code: gameCode });
+        const { error } = await supabase.from("hunts").insert({ runners, hunters, code: gameCode, win_points: winPoints, rotation_minutes: rotationMinutes });
         if (error) {
             console.error(error);
             toast("Failed to start hunt.");
@@ -167,6 +178,28 @@ export default function UserList() {
             toast("Hunt terminated.");
         } else {
             toast("Hunt already terminated.");
+        }
+    }
+
+    async function resumeHunt() {
+        if (!hasSupabaseEnv || !supabase) { toast("Supabase not configured."); return; }
+        const latest = hunts[hunts.length - 1];
+        if (!latest?.paused) { toast("No paused hunt to resume."); return; }
+        const { error } = await supabase.from("hunts").insert({
+            runners: latest.runners,
+            hunters: latest.hunters,
+            code: gameCode,
+            win_points: latest.win_points ?? winPoints,
+            rotation_minutes: latest.rotation_minutes ?? rotationMinutes,
+        });
+        if (error) {
+            toast("Failed to resume hunt.");
+        } else {
+            toast("Hunt resumed!");
+            supabase.from("hunts").select().then(({ data }) => {
+                const sorted = data?.sort((a, b) => a.id - b.id) ?? [];
+                setHunts(sorted);
+            });
         }
     }
 
@@ -303,7 +336,41 @@ export default function UserList() {
                     <Button onClick={pickRunnersRandomly} className="bg-blue-500 hover:bg-blue-600 text-white">
                         Pick Runners Randomly
                     </Button>
+
+                    <div className="flex flex-col gap-2 bg-gray-100 dark:bg-gray-800 p-3 rounded-xl">
+                        <h3 className="font-semibold text-sm">Hunt Settings</h3>
+                        <div className="flex gap-3">
+                            <label className="flex flex-col gap-1 flex-1 text-xs text-slate-500">
+                                Win at ___ pts
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={winPoints}
+                                    onChange={(e) => setWinPoints(Number(e.target.value))}
+                                    className="rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-sm text-slate-900 dark:text-slate-100"
+                                />
+                            </label>
+                            <label className="flex flex-col gap-1 flex-1 text-xs text-slate-500">
+                                Rotation (min)
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={rotationMinutes}
+                                    onChange={(e) => setRotationMinutes(Number(e.target.value))}
+                                    className="rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-sm text-slate-900 dark:text-slate-100"
+                                />
+                            </label>
+                        </div>
+                    </div>
+
                     <Button onClick={startRun}>Start Hunt</Button>
+
+                    {hunts[hunts.length - 1]?.paused && (
+                        <Button onClick={resumeHunt} className="bg-green-500 hover:bg-green-600 text-white">
+                            Resume Hunt (new runners ready)
+                        </Button>
+                    )}
+
                     <Button onClick={terminate} className="bg-rose-500 hover:bg-rose-600 text-white">
                         Terminate current hunt
                     </Button>

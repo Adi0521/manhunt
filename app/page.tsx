@@ -44,6 +44,9 @@ export default function HomePage() {
   const [lobbyPlayers, setLobbyPlayers] = useState<string[]>([]);
   const [pairs, setPairs] = useState<any[]>([]);
 
+  const [showFreezeTeamPicker, setShowFreezeTeamPicker] = useState(false);
+  const [frozenSecondsLeft, setFrozenSecondsLeft] = useState(0);
+
   if (!hasSupabaseEnv || !supabase) {
     return (
       <div className="min-h-screen bg-stone-300 dark:bg-neutral-900 text-slate-900 dark:text-slate-100">
@@ -263,6 +266,30 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    if (!hasSupabaseEnv || !supabase) return;
+    const channel = sb.channel("hunts-updates")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "hunts" }, (payload) => {
+        const updated = payload.new as any;
+        setHunts((prev) => prev.map((h) => h.id === updated.id ? { ...h, ...updated } : h));
+      })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const hunt = hunts[hunts.length - 1];
+      if (hunt?.frozen_until) {
+        const secs = Math.max(0, Math.floor((new Date(hunt.frozen_until).valueOf() - Date.now()) / 1000));
+        setFrozenSecondsLeft(secs);
+      } else {
+        setFrozenSecondsLeft(0);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [hunts]);
+
+  useEffect(() => {
     if (!playerGameCode || !hasSupabaseEnv || !supabase) return;
     const channel = sb.channel("pairs-lobby")
       .on("postgres_changes", { event: "*", schema: "public", table: "pairs" }, () => {
@@ -332,7 +359,15 @@ export default function HomePage() {
     } else {
       oldPoints = data[0].points;
     }
-    await sb.from('points').update({ points: newPoints + oldPoints }).eq('user', user);
+    const finalPoints = newPoints + oldPoints;
+    await sb.from('points').update({ points: finalPoints }).eq('user', user);
+
+    const hunt = hunts[hunts.length - 1];
+    const winThreshold = hunt?.win_points ?? 15;
+    if (hunt?.runners?.includes(user) && finalPoints >= winThreshold) {
+      toast(`${user} wins with ${finalPoints} points!`);
+      await sb.from('hunts').insert({});
+    }
   }
 
   async function saveTask(user: string, task: string, points: number, status: number) {
@@ -341,6 +376,7 @@ export default function HomePage() {
 
   function completeChallenge() {
     if (currentChallenge[0] === "") { alert("No challenge to complete"); return; }
+    const isFreezeChallenge = currentChallenge[0].toLowerCase().includes("selfie with another team");
     setCurrentPoints((prev) => prev + currentChallenge[1]);
     toast("Challenge completed!");
     for (const runner of hunts[hunts.length - 1].runners) {
@@ -349,6 +385,7 @@ export default function HomePage() {
       deleteDrawnTasks(runner);
     }
     setCurrentChallenge(["", 0]);
+    if (isFreezeChallenge) setShowFreezeTeamPicker(true);
   }
 
   function skipChallenge() {
@@ -365,6 +402,10 @@ export default function HomePage() {
 
   async function vetoChallenge() {
     if (currentChallenge[0] === "") { alert("No challenge to complete"); return; }
+    if (currentChallenge[0].toLowerCase().includes("go drink water")) {
+      toast("This challenge cannot be vetoed!");
+      return;
+    }
     setPastChallenges([...pastChallenges, [currentChallenge[0], currentChallenge[1], 0]]);
     setCurrentChallenge(["", 0]);
     toast("Challenge vetoed. You must wait 5 minutes to generate a new one.");
@@ -378,8 +419,62 @@ export default function HomePage() {
     location.reload();
   }
 
+  async function tagRunners() {
+    const hunt = hunts[hunts.length - 1];
+    if (!hunt?.runners) return;
+
+    const myPair = pairs.find((p: any) =>
+      (p.requester === playerName || p.partner === playerName || p.third === playerName) && p.confirmed
+    );
+    const taggingTeam: string[] = myPair
+      ? [myPair.requester, myPair.partner, ...(myPair.third ? [myPair.third] : [])]
+      : [playerName];
+
+    // Challenge #22 "Get tagged" — runner steals up to 3 pts from the tagger who clicked
+    const { data: drawnTasks } = await sb.from("drawntasks").select().in("user", hunt.runners);
+    const getTaggedActive = drawnTasks?.some((t: any) => t.task?.toLowerCase().includes("get tagged"));
+    if (getTaggedActive) {
+      const { data: taggerPtsData } = await sb.from("points").select().eq("user", playerName);
+      const taggerPts = taggerPtsData?.[0]?.points ?? 0;
+      const steal = Math.min(3, taggerPts);
+      if (steal > 0) {
+        await sb.from("points").update({ points: taggerPts - steal }).eq("user", playerName);
+        for (const runner of hunt.runners) {
+          await upsertPoints(runner, steal);
+        }
+        toast(`Runner steals ${steal} pts from you (Get Tagged card)!`);
+      }
+    }
+
+    const newRunners = taggingTeam;
+    const newHunters = [
+      ...hunt.runners,
+      ...hunt.hunters.filter((h: string) => !taggingTeam.includes(h)),
+    ];
+
+    await sb.from("hunts").update({ runners: newRunners, hunters: newHunters, paused: true }).eq("id", hunt.id);
+    for (const runner of hunt.runners) {
+      await deleteDrawnTasks(runner);
+    }
+    toast("Runners tagged! Waiting for admin to resume...");
+  }
+
+  async function freezeTeam(teamMembers: string[]) {
+    const hunt = hunts[hunts.length - 1];
+    if (!hunt) return;
+    const frozenUntil = new Date(Date.now() + 3 * 60 * 1000).toISOString();
+    await sb.from("hunts").update({ frozen_team: teamMembers, frozen_until: frozenUntil }).eq("id", hunt.id);
+    setShowFreezeTeamPicker(false);
+    toast("That team is frozen for 3 minutes!");
+  }
+
+  const currentHunt = hunts.length > 0 ? hunts[hunts.length - 1] : null;
   const isRunner = hunts.length > 0 && hunts[hunts.length - 1].runners?.includes(playerName);
+  const isHunter = !!currentHunt?.hunters?.includes(playerName);
   const isHunterOrSpectator = hunts.length > 0 && !hunts[hunts.length - 1].runners?.includes(playerName);
+  const huntPaused = !!currentHunt?.paused;
+  const isFrozen = !!currentHunt?.frozen_team?.includes(playerName) &&
+    !!currentHunt?.frozen_until && new Date() < new Date(currentHunt.frozen_until);
 
   return (
     <>
@@ -520,6 +615,15 @@ export default function HomePage() {
           ) : null}
 
           <div className={(hunts[hunts.length-1] == undefined || !hunts[hunts.length-1].runners) ? 'hidden' : undefined}>
+            {huntPaused && (
+              <div className="fixed inset-0 z-40 bg-black/70 flex items-center justify-center px-6">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 text-center max-w-sm w-full flex flex-col gap-3">
+                  <h2 className="text-2xl font-bold">Runners Tagged!</h2>
+                  <p className="text-slate-500 text-sm">Regroup and wait for the admin to resume the game with the new runner team.</p>
+                </div>
+              </div>
+            )}
+
             {(hunts.length == 0 || !hunts[0]) ? (
               <h1>No hunts</h1>
             ) : (
@@ -529,17 +633,34 @@ export default function HomePage() {
                 {!loading && (
                   <>
                     <RealtimeStream serverData={hunts ?? []} />
-                    {isHunterOrSpectator && (huntTime ?? 0) < (60*30) && (
+                    {isHunterOrSpectator && (huntTime ?? 0) < ((currentHunt?.rotation_minutes ?? 30) * 60) && (
                       <>
                         <PointsStream pointsArr={everyonePoints ?? []} />
                         <CurrentChallengeStream theChallenge={otherCurrentChallenge ?? []} />
                         <AllTasksStream theChallenge={otherChallenges ?? []} />
+
+                        {isHunter && (huntTime ?? 0) > (60 * 3) && !huntPaused && (
+                          <div className="mt-4 flex flex-col items-center gap-2">
+                            {isFrozen ? (
+                              <p className="text-blue-500 font-medium text-sm">
+                                Frozen — {Math.floor(frozenSecondsLeft / 60)}m {frozenSecondsLeft % 60}s remaining
+                              </p>
+                            ) : (
+                              <Button
+                                className="bg-rose-600 hover:bg-rose-700 text-white px-6"
+                                onClick={tagRunners}
+                              >
+                                Tag Runner Team
+                              </Button>
+                            )}
+                          </div>
+                        )}
                       </>
                     )}
                   </>
                 )}
 
-                {isRunner && (huntTime ?? 0) < (60*30) && (
+                {isRunner && (huntTime ?? 0) < ((currentHunt?.rotation_minutes ?? 30) * 60) && (
                   <>
                     <PointsStreamSelf selfPoints={currentPoints} user={playerName} challenge={currentChallenge} timeOutStatus={timeOutStatus} onChallengeChange={setCurrentChallenge}/>
                     {timeOutStatus == 0 && (
@@ -573,6 +694,40 @@ export default function HomePage() {
         </main>
         <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center" />
       </div>
+
+      {showFreezeTeamPicker && (() => {
+        const hunt = hunts[hunts.length - 1];
+        const runnerSet = new Set(hunt?.runners ?? []);
+        const hunterPairs = pairs.filter((p: any) =>
+          p.confirmed && !runnerSet.has(p.requester) && !runnerSet.has(p.partner)
+        );
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center px-4">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-sm p-6 flex flex-col gap-4">
+              <h2 className="text-xl font-bold text-center">Freeze which team?</h2>
+              <p className="text-sm text-slate-500 text-center">They can't tag you for 3 minutes.</p>
+              {hunterPairs.map((p: any) => {
+                const members = [p.requester, p.partner, ...(p.third ? [p.third] : [])];
+                return (
+                  <button
+                    key={p.id}
+                    className="p-3 rounded-lg bg-blue-100 dark:bg-blue-900 text-center hover:bg-blue-200 dark:hover:bg-blue-800"
+                    onClick={() => freezeTeam(members)}
+                  >
+                    {members.join(" & ")}
+                  </button>
+                );
+              })}
+              <button
+                className="text-sm text-slate-400 hover:text-slate-600 text-center"
+                onClick={() => setShowFreezeTeamPicker(false)}
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {showMenu && (() => {
         const activeHunt = hunts.length > 0 && hunts[hunts.length - 1]?.runners ? hunts[hunts.length - 1] : null;

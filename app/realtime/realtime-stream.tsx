@@ -15,6 +15,9 @@ type Hunt = {
     created_at: string;
     runners: string[];
     hunters: string[];
+    win_points?: number;
+    rotation_minutes?: number;
+    paused?: boolean;
 }
 
 export default function RealtimeStream({serverData} : {serverData: Hunt[]}) { 
@@ -100,6 +103,8 @@ export default function RealtimeStream({serverData} : {serverData: Hunt[]}) {
         return () => clearInterval(interval);
     }, [])
 
+    const rotationSecs = (hunts[indexToUse]?.rotation_minutes ?? 30) * 60;
+
     return (
 
         <div className="-mt-17 text-center text-red-700">
@@ -122,10 +127,10 @@ export default function RealtimeStream({serverData} : {serverData: Hunt[]}) {
                             <h1>Hunting begins in: {String(Math.floor((180-huntTime)/60))}m {String((180-huntTime)%60)}s</h1>
                             <Progress value={huntTime*100/180} />
                         </>
-                    ) : huntTime !== undefined && huntTime < 1800 ? (
+                    ) : huntTime !== undefined && huntTime < rotationSecs ? (
                         <>
-                            <h1>Time until turnover: {String(Math.floor((1800-huntTime)/60))}m {String((1800-huntTime)%60)}s</h1>
-                            <Progress value={huntTime*100/1800} />
+                            <h1>Time until turnover: {String(Math.floor((rotationSecs-huntTime)/60))}m {String((rotationSecs-huntTime)%60)}s</h1>
+                            <Progress value={huntTime*100/rotationSecs} />
                         </>
                     ) : huntTime !== undefined ? (
                         <h1>Hunt elapsed</h1>
@@ -133,7 +138,7 @@ export default function RealtimeStream({serverData} : {serverData: Hunt[]}) {
                         <h1>Loading time...</h1>
                     )}
 
-                    { huntTime !== undefined && huntTime < 1800 ? (
+                    { huntTime !== undefined && huntTime < rotationSecs ? (
                         <>
                         <h1 className="mt-8 font-bold">Hunters:</h1>
                             {hunts[hunts.length-1].runners &&
@@ -162,7 +167,7 @@ export default function RealtimeStream({serverData} : {serverData: Hunt[]}) {
                         </>
                     ) : (
                         <>
-                        <h1>Runners</h1>  
+                        <h1>Runners</h1>
 
                             {hunts[hunts.length-1].runners &&
                                 <>
@@ -170,14 +175,15 @@ export default function RealtimeStream({serverData} : {serverData: Hunt[]}) {
                                         runner === session?.user.email ? (
                                             <h2 key={index} className="m-2">You</h2>
                                         ) : (
-                                            <h2 key={index} className="m-2">{runner}</h2> 
+                                            <h2 key={index} className="m-2">{runner}</h2>
                                         )
                                     ))} have completed their run.
                                 </>
                             }
 
                         </>
-                    )}           
+                    )}
+           
                 </div>
             ) : (
                 <h1>No hunts available</h1>
