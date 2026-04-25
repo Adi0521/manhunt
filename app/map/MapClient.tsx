@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { CircleMarker, MapContainer, Polygon, Popup, TileLayer, useMapEvents } from "react-leaflet";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CircleMarker, MapContainer, Polygon, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import type { LeafletMouseEvent } from "leaflet";
 import supabase, { hasSupabaseEnv } from "../utils/supabase";
 
@@ -19,6 +19,20 @@ function MapClickHandler({ enabled, onAddPoint }: { enabled: boolean; onAddPoint
       if (enabled) onAddPoint([e.latlng.lat, e.latlng.lng]);
     },
   });
+  return null;
+}
+
+function FitBounds({ players }: { players: PlayerLocation[] }) {
+  const map = useMap();
+  const fitted = useRef(false);
+
+  useEffect(() => {
+    if (fitted.current || players.length === 0) return;
+    const bounds = players.map((p) => [p.lat, p.lng] as [number, number]);
+    map.fitBounds(bounds, { padding: [48, 48], maxZoom: 17 });
+    fitted.current = true;
+  }, [map, players]);
+
   return null;
 }
 
@@ -216,6 +230,7 @@ export default function MapClient() {
                 );
               })}
 
+              <FitBounds players={allPlayers} />
               <MapClickHandler enabled={false} onAddPoint={() => {}} />
             </MapContainer>
           </div>
