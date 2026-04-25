@@ -370,19 +370,7 @@ export default function HomePage() {
     if (isFreezeChallenge) setShowFreezeTeamPicker(true);
   }
 
-  function skipChallenge() {
-    if (currentChallenge[0] === "") { alert("No challenge to complete"); return; }
-    setCurrentPoints(currentPoints - 1);
-    toast("Challenge skipped!");
-    for (const runner of hunts[hunts.length - 1].runners) {
-      upsertPoints(runner, -1);
-      saveTask(runner, currentChallenge[0], currentChallenge[1], 2);
-      deleteDrawnTasks(runner);
-    }
-    setCurrentChallenge(["", 0]);
-  }
-
-  async function vetoChallenge() {
+async function vetoChallenge() {
     if (currentChallenge[0] === "") { alert("No challenge to complete"); return; }
     if (currentChallenge[0].toLowerCase().includes("go drink water")) {
       toast("This challenge cannot be vetoed!");
@@ -603,7 +591,6 @@ export default function HomePage() {
                             {(huntTime ?? 0) > (60*3) && (
                               <div className="flex gap-[24px] flex-wrap items-center justify-center">
                                 <Button className="bg-green-400" onClick={completeChallenge}>Complete</Button>
-                                <Button className="bg-yellow-400" onClick={skipChallenge}>Skip</Button>
                                 <Button className="bg-red-400" onClick={vetoChallenge}>Veto</Button>
                               </div>
                             )}
