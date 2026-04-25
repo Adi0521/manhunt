@@ -51,6 +51,12 @@ export default function generateChallenge(){
         ["Find a sign in a language other than English, send a picture", 1],
         ["Find a person with a pet other than a dog, take a picture", 2],
         ["Find a public staircase and walk up and down, send proof", 2],
+        ["Take pictures of yourself spelling out Grainger (how people do YMCA)", 1],
+        ["Teach someone who isn't your partner a secret handshake", 2],
+        ["Hug a tree for 5 minutes", 3],
+        ["Recreate the I am your Father scene from The Empire Strikes back, with music in the background (Luke has to fall to the ground)", 1],
+        ["Sing the first 20 elements of the Periodic Table Song by ASAP Science together, restart if anyone messes up", 2],
+        ["Take 10 pictures with 1 unique UIUC building in each picture", 2],
     ];
 
 
