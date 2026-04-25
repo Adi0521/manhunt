@@ -42,6 +42,8 @@ export default function HomePage() {
 
   const [playerGameCode, setPlayerGameCode] = useState<string>("");
   const [pairs, setPairs] = useState<any[]>([]);
+  const [challengeDrawnAt, setChallengeDrawnAt] = useState<Date | null>(null);
+  const [challengeSecondsLeft, setChallengeSecondsLeft] = useState<number | null>(null);
 
   const [showFreezeTeamPicker, setShowFreezeTeamPicker] = useState(false);
   const [frozenSecondsLeft, setFrozenSecondsLeft] = useState(0);
@@ -214,6 +216,7 @@ export default function HomePage() {
       .then(({ data }) => {
         if (data && data.length > 0) {
           setCurrentChallenge([data[data.length-1].task, data[data.length-1].points]);
+          setChallengeDrawnAt(new Date(data[data.length-1].created_at));
         }
       });
   }
@@ -287,6 +290,20 @@ export default function HomePage() {
     }, 1000);
     return () => clearInterval(interval);
   }, [hunts]);
+
+  useEffect(() => {
+    const hunt = hunts.length > 0 ? hunts[hunts.length - 1] : null;
+    const timeoutMins = (hunt as any)?.challenge_timeout_minutes;
+    if (!challengeDrawnAt || !timeoutMins) {
+      setChallengeSecondsLeft(null);
+      return;
+    }
+    const deadline = new Date(challengeDrawnAt.getTime() + timeoutMins * 60 * 1000);
+    const tick = () => setChallengeSecondsLeft(Math.max(0, Math.floor((deadline.getTime() - Date.now()) / 1000)));
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [challengeDrawnAt, hunts]);
 
   useEffect(() => {
     if (!playerGameCode || !hasSupabaseEnv || !supabase) return;
@@ -367,6 +384,7 @@ export default function HomePage() {
       deleteDrawnTasks(runner);
     }
     setCurrentChallenge(["", 0]);
+    setChallengeDrawnAt(null);
     if (isFreezeChallenge) setShowFreezeTeamPicker(true);
   }
 
@@ -378,6 +396,7 @@ async function vetoChallenge() {
     }
     setPastChallenges([...pastChallenges, [currentChallenge[0], currentChallenge[1], 0]]);
     setCurrentChallenge(["", 0]);
+    setChallengeDrawnAt(null);
     toast("Challenge vetoed. You must wait 5 minutes to generate a new one.");
     for (const runner of hunts[hunts.length - 1].runners) {
       saveTask(runner, currentChallenge[0], currentChallenge[1], 0);
@@ -583,7 +602,12 @@ async function vetoChallenge() {
 
                 {isRunner && (huntTime ?? 0) < ((currentHunt?.rotation_minutes ?? 30) * 60) && (
                   <>
-                    <PointsStreamSelf selfPoints={currentPoints} user={playerName} challenge={currentChallenge} timeOutStatus={timeOutStatus} onChallengeChange={setCurrentChallenge}/>
+                    <PointsStreamSelf selfPoints={currentPoints} user={playerName} challenge={currentChallenge} timeOutStatus={timeOutStatus} onChallengeChange={setCurrentChallenge} onChallengeDrawn={(drawnAt) => setChallengeDrawnAt(drawnAt)}/>
+                    {challengeSecondsLeft !== null && currentChallenge[0] !== "" && (
+                      <p className={`text-xs text-center ${challengeSecondsLeft < 60 ? "text-red-500 font-bold" : "text-slate-500"}`}>
+                        Complete challenge in: {Math.floor(challengeSecondsLeft / 60)}m {challengeSecondsLeft % 60}s
+                      </p>
+                    )}
                     {timeOutStatus == 0 && (
                       <>
                         {currentChallenge[0] !== "" ? (

@@ -16,9 +16,10 @@ type PointsStreamSelfProps = {
     challenge: [string, number];
     timeOutStatus: number;
     onChallengeChange?: (challenge: [string, number]) => void;
+    onChallengeDrawn?: (drawnAt: Date) => void;
 };
 
-export default function PointsStreamSelf({ selfPoints, user, challenge, timeOutStatus, onChallengeChange }: PointsStreamSelfProps) { 
+export default function PointsStreamSelf({ selfPoints, user, challenge, timeOutStatus, onChallengeChange, onChallengeDrawn }: PointsStreamSelfProps) {
     const [points, setPoints] = useState<number>(selfPoints);
     const [currentChallenge, setCurrentChallenge] = useState<[string, number]>(challenge);
 
@@ -84,6 +85,9 @@ export default function PointsStreamSelf({ selfPoints, user, challenge, timeOutS
 
             if (payload.new.user == user && payload.new.task != currentChallenge[0]) {
                 setCurrentChallenge([payload.new.task, payload.new.points]);
+                if (onChallengeDrawn && payload.new.created_at) {
+                    onChallengeDrawn(new Date(payload.new.created_at));
+                }
             }
 
             // alert(currentChallenge[0] + " has been drawn!");

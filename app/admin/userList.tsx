@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 
 import supabase, { hasSupabaseEnv } from "../utils/supabase";
@@ -23,6 +23,8 @@ export default function UserList() {
     const [pairingFirst, setPairingFirst] = useState<string | null>(null);
     const [winPoints, setWinPoints] = useState<number>(15);
     const [rotationMinutes, setRotationMinutes] = useState<number>(30);
+    const [challengeTimeoutMinutes, setChallengeTimeoutMinutes] = useState<number>(10);
+    const isTerminatingRef = useRef(false);
 
     useEffect(() => {
         const admin = localStorage.getItem("mh_is_admin") === "true";
@@ -89,6 +91,54 @@ export default function UserList() {
     useEffect(() => {
         getPoints();
     }, []);
+
+    useEffect(() => {
+        const hunt = hunts[hunts.length - 1];
+        if (!hunt?.runners || !hunt?.created_at || !hasSupabaseEnv || !supabase) return;
+
+        isTerminatingRef.current = false;
+
+        const rotSecs = (hunt.rotation_minutes ?? rotationMinutes) * 60;
+        const timeoutSecs = ((hunt as any).challenge_timeout_minutes ?? challengeTimeoutMinutes) * 60;
+
+        async function doAutoTerminate(reason: string) {
+            if (isTerminatingRef.current) return;
+            isTerminatingRef.current = true;
+            toast(reason);
+            await supabase!.from("hunts").insert({});
+            await Promise.all([
+                supabase!.from("locations").delete().neq("user", ""),
+                supabase!.from("drawntasks").delete().neq("user", ""),
+                supabase!.from("tasks").delete().neq("user", ""),
+            ]);
+        }
+
+        const interval = setInterval(async () => {
+            if (isTerminatingRef.current || hunt.paused) return;
+
+            const now = Date.now();
+            const huntElapsed = (now - new Date(hunt.created_at).getTime()) / 1000;
+
+            if (huntElapsed >= rotSecs) {
+                await doAutoTerminate("Run time expired — ending hunt automatically.");
+                return;
+            }
+
+            const { data: drawn } = await supabase!.from("drawntasks")
+                .select("created_at")
+                .in("user", hunt.runners)
+                .limit(1);
+
+            if (drawn && drawn.length > 0) {
+                const challengeAge = (now - new Date(drawn[0].created_at).getTime()) / 1000;
+                if (challengeAge >= timeoutSecs) {
+                    await doAutoTerminate("Challenge timeout — runners didn't complete in time.");
+                }
+            }
+        }, 10000);
+
+        return () => clearInterval(interval);
+    }, [hunts]);
 
     async function getPoints() {
         if (!hasSupabaseEnv || !supabase) return;
@@ -183,7 +233,7 @@ export default function UserList() {
             ...players.filter((p) => !pairedSet.has(p)),
         ];
 
-        const { error } = await supabase.from("hunts").insert({ runners, hunters, code: gameCode, win_points: winPoints, rotation_minutes: rotationMinutes });
+        const { error } = await supabase.from("hunts").insert({ runners, hunters, code: gameCode, win_points: winPoints, rotation_minutes: rotationMinutes, challenge_timeout_minutes: challengeTimeoutMinutes });
         if (error) {
             console.error(error);
             toast("Failed to start hunt.");
@@ -404,12 +454,24 @@ export default function UserList() {
                                 />
                             </label>
                             <label className="flex flex-col gap-1 flex-1 text-xs text-slate-500">
-                                Rotation (min)
+                                Run time (min)
                                 <input
                                     type="number"
                                     min={1}
                                     value={rotationMinutes}
                                     onChange={(e) => setRotationMinutes(Number(e.target.value))}
+                                    className="rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-sm text-slate-900 dark:text-slate-100"
+                                />
+                            </label>
+                        </div>
+                        <div className="flex gap-3">
+                            <label className="flex flex-col gap-1 flex-1 text-xs text-slate-500">
+                                Challenge timeout (min)
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={challengeTimeoutMinutes}
+                                    onChange={(e) => setChallengeTimeoutMinutes(Number(e.target.value))}
                                     className="rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-sm text-slate-900 dark:text-slate-100"
                                 />
                             </label>
