@@ -120,28 +120,41 @@ export default function UserList() {
 
     async function adminPair(p1: string, p2: string) {
         if (!hasSupabaseEnv || !supabase) return;
-        await supabase.from("pairs").insert({ requester: p1, partner: p2, game_code: gameCode, confirmed: true });
+        if (!gameCode) { toast("Set a game code first."); return; }
+        const { error } = await supabase.from("pairs").insert({ requester: p1, partner: p2, game_code: gameCode, confirmed: true });
+        if (error) { toast("Failed to pair: " + error.message); return; }
         setPairingFirst(null);
         toast(`${p1} + ${p2} paired!`);
+        const { data } = await supabase.from("pairs").select().eq("game_code", gameCode);
+        setPairs(data ?? []);
     }
 
     async function adminUnpair(pairId: number) {
         if (!hasSupabaseEnv || !supabase) return;
-        await supabase.from("pairs").delete().eq("id", pairId);
+        const { error } = await supabase.from("pairs").delete().eq("id", pairId);
+        if (error) { toast("Failed to unpair: " + error.message); return; }
         toast("Pair removed.");
+        const { data } = await supabase.from("pairs").select().eq("game_code", gameCode);
+        setPairs(data ?? []);
     }
 
     async function assignToTeam(pairId: number, player: string) {
         if (!hasSupabaseEnv || !supabase) return;
-        await supabase.from("pairs").update({ third: player }).eq("id", pairId);
+        const { error } = await supabase.from("pairs").update({ third: player }).eq("id", pairId);
+        if (error) { toast("Failed to assign: " + error.message); return; }
         setAssigningPlayer(null);
         toast(`${player} added to team.`);
+        const { data } = await supabase.from("pairs").select().eq("game_code", gameCode);
+        setPairs(data ?? []);
     }
 
     async function removeFromTeam(pairId: number) {
         if (!hasSupabaseEnv || !supabase) return;
-        await supabase.from("pairs").update({ third: null }).eq("id", pairId);
+        const { error } = await supabase.from("pairs").update({ third: null }).eq("id", pairId);
+        if (error) { toast("Failed to remove: " + error.message); return; }
         toast("Player removed from team.");
+        const { data } = await supabase.from("pairs").select().eq("game_code", gameCode);
+        setPairs(data ?? []);
     }
 
     function pickRunnersRandomly() {
