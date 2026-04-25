@@ -20,6 +20,7 @@ export default function UserList() {
     const [pairs, setPairs] = useState<any[]>([]);
     const [runnerPairId, setRunnerPairId] = useState<number | null>(null);
     const [assigningPlayer, setAssigningPlayer] = useState<string | null>(null);
+    const [pairingFirst, setPairingFirst] = useState<string | null>(null);
     const [winPoints, setWinPoints] = useState<number>(15);
     const [rotationMinutes, setRotationMinutes] = useState<number>(30);
 
@@ -117,6 +118,19 @@ export default function UserList() {
         localStorage.setItem("mh_admin_code", upper);
     }
 
+    async function adminPair(p1: string, p2: string) {
+        if (!hasSupabaseEnv || !supabase) return;
+        await supabase.from("pairs").insert({ requester: p1, partner: p2, game_code: gameCode, confirmed: true });
+        setPairingFirst(null);
+        toast(`${p1} + ${p2} paired!`);
+    }
+
+    async function adminUnpair(pairId: number) {
+        if (!hasSupabaseEnv || !supabase) return;
+        await supabase.from("pairs").delete().eq("id", pairId);
+        toast("Pair removed.");
+    }
+
     async function assignToTeam(pairId: number, player: string) {
         if (!hasSupabaseEnv || !supabase) return;
         await supabase.from("pairs").update({ third: player }).eq("id", pairId);
@@ -135,7 +149,7 @@ export default function UserList() {
         if (confirmed.length === 0) { toast("No confirmed pairs yet."); return; }
         const pick = confirmed[Math.floor(Math.random() * confirmed.length)];
         setRunnerPairId(pick.id);
-        toast(`Runners: ${pick.requester} & ${pick.partner}`);
+        toast(`Runners: ${pick.requester} + ${pick.partner}`);
     }
 
     async function startRun() {
@@ -273,16 +287,18 @@ export default function UserList() {
                                 <h2 className="text-xl text-center">Pairs ({confirmed.length})</h2>
                                 <p className="text-xs text-center text-slate-500">
                                     {assigningPlayer
-                                        ? `Tap a pair to add ${assigningPlayer} to it.`
-                                        : "Tap a pair to designate as Runners (red). All others become Hunters."}
+                                        ? `Tap a pair to add ${assigningPlayer} as 3rd.`
+                                        : pairingFirst
+                                        ? `Tap another player to pair with ${pairingFirst}.`
+                                        : "Tap a pair to designate as Runners (red). Tap two unpaired players to create a pair."}
                                 </p>
                                 {confirmed.length === 0 ? (
-                                    <p className="text-sm text-center text-slate-400 py-4">No pairs yet — players need to pair up in the lobby.</p>
+                                    <p className="text-sm text-center text-slate-400 py-4">No pairs yet — tap two players below to pair them.</p>
                                 ) : (
                                     confirmed.map((pair: any) => {
                                         const isRunners = pair.id === runnerPairId;
                                         const canAddThird = assigningPlayer && !pair.third;
-                                        const label = pairMembers(pair).join(" & ");
+                                        const label = pairMembers(pair).join(" + ");
                                         return (
                                             <div key={pair.id} className="flex flex-col gap-1">
                                                 <div
@@ -295,40 +311,59 @@ export default function UserList() {
                                                     }`}
                                                     onClick={() => {
                                                         if (canAddThird) assignToTeam(pair.id, assigningPlayer!);
-                                                        else if (!assigningPlayer) setRunnerPairId(isRunners ? null : pair.id);
+                                                        else if (!assigningPlayer && !pairingFirst) setRunnerPairId(isRunners ? null : pair.id);
                                                     }}
                                                 >
                                                     {label} — {isRunners ? "Runners" : "Hunters"}
                                                     {canAddThird && <span className="ml-2 text-blue-700 dark:text-blue-300 text-xs">(tap to add)</span>}
                                                 </div>
-                                                {pair.third && (
+                                                <div className="flex gap-2 justify-center">
+                                                    {pair.third && (
+                                                        <button
+                                                            className="text-xs text-slate-400 hover:text-red-500"
+                                                            onClick={() => removeFromTeam(pair.id)}
+                                                        >
+                                                            Remove {pair.third}
+                                                        </button>
+                                                    )}
                                                     <button
-                                                        className="text-xs text-slate-400 hover:text-red-500 text-center"
-                                                        onClick={() => removeFromTeam(pair.id)}
+                                                        className="text-xs text-slate-400 hover:text-red-500"
+                                                        onClick={() => adminUnpair(pair.id)}
                                                     >
-                                                        Remove {pair.third} from this team
+                                                        Unpair
                                                     </button>
-                                                )}
+                                                </div>
                                             </div>
                                         );
                                     })
                                 )}
                                 {unpaired.length > 0 && (
                                     <div className="mt-2 flex flex-col gap-1">
-                                        <p className="text-xs text-center text-slate-500 mb-1">Unpaired players — tap to add to a team:</p>
+                                        <p className="text-xs text-center text-slate-500 mb-1">
+                                            {pairingFirst ? `Select 2nd player to pair with ${pairingFirst}:` : "Unpaired players:"}
+                                        </p>
                                         {unpaired.map((p) => (
                                             <div
                                                 key={p}
                                                 className={`p-2 rounded-md text-sm flex items-center justify-between cursor-pointer transition-all duration-200 ${
-                                                    assigningPlayer === p
+                                                    pairingFirst === p || assigningPlayer === p
                                                         ? "bg-blue-200 dark:bg-blue-800 ring-2 ring-blue-400"
                                                         : "bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
                                                 }`}
-                                                onClick={() => setAssigningPlayer(assigningPlayer === p ? null : p)}
+                                                onClick={() => {
+                                                    if (pairingFirst) {
+                                                        if (pairingFirst === p) { setPairingFirst(null); return; }
+                                                        adminPair(pairingFirst, p);
+                                                    } else if (assigningPlayer) {
+                                                        setAssigningPlayer(assigningPlayer === p ? null : p);
+                                                    } else {
+                                                        setPairingFirst(p);
+                                                    }
+                                                }}
                                             >
                                                 <span>{p}</span>
                                                 <span className="text-xs text-slate-400">
-                                                    {assigningPlayer === p ? "tap a pair above ↑" : "+ add to team"}
+                                                    {pairingFirst === p ? "selected — tap another" : assigningPlayer === p ? "tap a pair ↑" : "tap to select"}
                                                 </span>
                                             </div>
                                         ))}

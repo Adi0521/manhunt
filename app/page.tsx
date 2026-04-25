@@ -41,7 +41,6 @@ export default function HomePage() {
   const [showMenu, setShowMenu] = useState(false);
 
   const [playerGameCode, setPlayerGameCode] = useState<string>("");
-  const [lobbyPlayers, setLobbyPlayers] = useState<string[]>([]);
   const [pairs, setPairs] = useState<any[]>([]);
 
   const [showFreezeTeamPicker, setShowFreezeTeamPicker] = useState(false);
@@ -71,9 +70,6 @@ export default function HomePage() {
     const code = getGameCode() ?? "";
 
     function loadLobbyData(c: string) {
-      sb.from("players").select("name").eq("game_code", c).then(({ data }) => {
-        setLobbyPlayers(data?.map((p: any) => p.name) ?? []);
-      });
       sb.from("pairs").select().eq("game_code", c).then(({ data }) => {
         setPairs(data ?? []);
       });
@@ -300,11 +296,6 @@ export default function HomePage() {
           setPairs(data ?? []);
         });
       })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "players" }, (payload) => {
-        if ((payload.new as any).game_code === playerGameCode) {
-          setLobbyPlayers((prev) => prev.includes((payload.new as any).name) ? prev : [...prev, (payload.new as any).name]);
-        }
-      })
       .subscribe();
 
     const poll = setInterval(() => {
@@ -319,28 +310,6 @@ export default function HomePage() {
     };
   }, [playerGameCode]);
 
-  async function sendPairRequest(target: string) {
-    if (!playerGameCode) return;
-    await sb.from("pairs").delete().eq("requester", playerName).eq("confirmed", false);
-    await sb.from("pairs").insert({ requester: playerName, partner: target, game_code: playerGameCode, confirmed: false });
-    toast(`Pair request sent to ${target}`);
-  }
-
-  async function acceptPairRequest(pairId: number) {
-    await sb.from("pairs").update({ confirmed: true }).eq("id", pairId);
-    toast("Paired up!");
-  }
-
-  async function declinePairRequest(pairId: number) {
-    await sb.from("pairs").delete().eq("id", pairId);
-  }
-
-  async function unpair() {
-    const myPair = pairs.find((p: any) =>
-      (p.requester === playerName || p.partner === playerName) && p.confirmed
-    );
-    if (myPair) await sb.from("pairs").delete().eq("id", myPair.id);
-  }
 
   async function saveDrawnTasks(user: string, task: string, points: number) {
     await sb.from('drawntasks').insert({ user, task, points });
@@ -522,17 +491,7 @@ export default function HomePage() {
             (() => {
               const confirmedPairs = pairs.filter((p: any) => p.confirmed);
               const myConfirmedPair = pairs.find((p: any) =>
-                (p.requester === playerName || p.partner === playerName) && p.confirmed
-              );
-              const incomingRequest = pairs.find((p: any) =>
-                p.partner === playerName && !p.confirmed
-              );
-              const outgoingRequest = pairs.find((p: any) =>
-                p.requester === playerName && !p.confirmed
-              );
-              const pairedSet = new Set(confirmedPairs.flatMap((p: any) => [p.requester, p.partner]));
-              const availablePlayers = lobbyPlayers.filter(
-                (p: string) => p !== playerName && !pairedSet.has(p)
+                (p.requester === playerName || p.partner === playerName || p.third === playerName) && p.confirmed
               );
               return (
                 <div className="flex flex-col gap-4 w-full max-w-sm">
@@ -540,7 +499,7 @@ export default function HomePage() {
                     <div className="text-center mb-2">
                       <h1 className="text-3xl font-bold">Round Complete!</h1>
                       <p className="text-slate-500 text-sm">
-                        Runners: {hunts[hunts.length-2].runners.join(" & ")}
+                        Runners: {hunts[hunts.length-2].runners.join(" + ")}
                       </p>
                     </div>
                   )}
@@ -555,49 +514,10 @@ export default function HomePage() {
                           {myConfirmedPair.requester === playerName ? myConfirmedPair.partner : myConfirmedPair.requester}
                         </p>
                       </div>
-                      <button
-                        className="text-xs text-slate-400 hover:text-slate-600 underline"
-                        onClick={unpair}
-                      >
-                        Change partner
-                      </button>
-                    </div>
-                  ) : incomingRequest ? (
-                    <div className="flex flex-col gap-3 items-center bg-blue-50 dark:bg-blue-950 p-4 rounded-xl">
-                      <p className="text-center">
-                        <strong>{incomingRequest.requester}</strong> wants to be your partner
-                      </p>
-                      <div className="flex gap-3">
-                        <Button className="bg-green-400 hover:bg-green-500 text-black" onClick={() => acceptPairRequest(incomingRequest.id)}>Accept</Button>
-                        <Button className="bg-red-400 hover:bg-red-500 text-white" onClick={() => declinePairRequest(incomingRequest.id)}>Decline</Button>
-                      </div>
-                    </div>
-                  ) : outgoingRequest ? (
-                    <div className="flex flex-col gap-2 items-center text-center">
-                      <p>Waiting for <strong>{outgoingRequest.partner}</strong> to accept…</p>
-                      <button
-                        className="text-xs text-slate-400 hover:text-slate-600 underline"
-                        onClick={() => declinePairRequest(outgoingRequest.id)}
-                      >
-                        Cancel request
-                      </button>
                     </div>
                   ) : (
-                    <div className="flex flex-col gap-2">
-                      <p className="text-center text-sm text-slate-500">Choose your partner:</p>
-                      {availablePlayers.length === 0 ? (
-                        <p className="text-center text-sm text-slate-400 py-2">No available players yet.</p>
-                      ) : (
-                        availablePlayers.map((player: string) => (
-                          <button
-                            key={player}
-                            className="p-3 rounded-md bg-gray-200 dark:bg-gray-700 text-center hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
-                            onClick={() => sendPairRequest(player)}
-                          >
-                            {player}
-                          </button>
-                        ))
-                      )}
+                    <div className="flex flex-col gap-2 items-center text-center py-2">
+                      <p className="text-sm text-slate-500">Waiting for admin to assign your partner…</p>
                     </div>
                   )}
 
@@ -613,7 +533,7 @@ export default function HomePage() {
                               : "bg-gray-100 dark:bg-gray-800"
                           }`}
                         >
-                          {pair.requester} & {pair.partner}
+                          {[pair.requester, pair.partner, ...(pair.third ? [pair.third] : [])].join(" + ")}
                         </div>
                       ))}
                     </div>
