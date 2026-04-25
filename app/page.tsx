@@ -279,6 +279,17 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    if (!hasSupabaseEnv || !supabase) return;
+    const channel = sb.channel("game-control")
+      .on("broadcast", { event: "kick_all" }, () => {
+        ["mh_name", "mh_game_code", "mh_is_admin", "mh_admin_code"].forEach((k) => localStorage.removeItem(k));
+        window.location.href = "/auth";
+      })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => {
     const interval = setInterval(() => {
       const hunt = hunts[hunts.length - 1];
       if (hunt?.frozen_until) {

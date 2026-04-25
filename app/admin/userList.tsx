@@ -285,6 +285,24 @@ export default function UserList() {
         }
     }
 
+    async function kickEveryone() {
+        if (!hasSupabaseEnv || !supabase) { toast("Supabase not configured."); return; }
+        const channel = supabase.channel("game-control");
+        channel.subscribe();
+        await channel.send({ type: "broadcast", event: "kick_all", payload: {} });
+        await Promise.all([
+            supabase.from("players").delete().neq("name", ""),
+            supabase.from("pairs").delete().neq("id", 0),
+            supabase.from("points").delete().neq("user", ""),
+            supabase.from("tasks").delete().neq("user", ""),
+            supabase.from("drawntasks").delete().neq("user", ""),
+            supabase.from("locations").delete().neq("user", ""),
+            supabase.from("hunts").delete().neq("id", 0),
+        ]);
+        ["mh_name", "mh_game_code", "mh_is_admin", "mh_admin_code"].forEach((k) => localStorage.removeItem(k));
+        window.location.href = "/auth";
+    }
+
     async function modPoints(adjustment: number, user: string, prevpoints: number) {
         if (!hasSupabaseEnv || !supabase) return;
         await supabase.from("points").update({ points: prevpoints + adjustment }).eq("user", user);
@@ -488,6 +506,10 @@ export default function UserList() {
 
                     <Button onClick={terminate} className="bg-rose-500 hover:bg-rose-600 text-white">
                         Terminate current hunt
+                    </Button>
+
+                    <Button onClick={kickEveryone} className="bg-red-900 hover:bg-red-800 text-white">
+                        Kick Everyone (reset lobby)
                     </Button>
 
                     <div className="flex flex-col gap-2">

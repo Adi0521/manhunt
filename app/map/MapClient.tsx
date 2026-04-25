@@ -50,6 +50,17 @@ export default function MapClient() {
   }, []);
 
   useEffect(() => {
+    if (!hasSupabaseEnv || !supabase) return;
+    const channel = supabase.channel("game-control")
+      .on("broadcast", { event: "kick_all" }, () => {
+        ["mh_name", "mh_game_code", "mh_is_admin", "mh_admin_code"].forEach((k) => localStorage.removeItem(k));
+        window.location.href = "/auth";
+      })
+      .subscribe();
+    return () => { supabase!.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => {
     if (!navigator.geolocation) {
       setPermissionError("Geolocation is not supported by this browser.");
       return;
