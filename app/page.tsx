@@ -291,8 +291,8 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!playerGameCode || !hasSupabaseEnv || !supabase) return;
-    const channel = sb.channel("pairs-lobby")
-      .on("postgres_changes", { event: "*", schema: "public", table: "pairs" }, () => {
+    const channel = sb.channel(`pairs-lobby:${playerGameCode}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "pairs", filter: `game_code=eq.${playerGameCode}` }, () => {
         sb.from("pairs").select().eq("game_code", playerGameCode).then(({ data }) => {
           setPairs(data ?? []);
         });
@@ -303,7 +303,17 @@ export default function HomePage() {
         }
       })
       .subscribe();
-    return () => { sb.removeChannel(channel); };
+
+    const poll = setInterval(() => {
+      sb.from("pairs").select().eq("game_code", playerGameCode).then(({ data }) => {
+        setPairs(data ?? []);
+      });
+    }, 4000);
+
+    return () => {
+      sb.removeChannel(channel);
+      clearInterval(poll);
+    };
   }, [playerGameCode]);
 
   async function sendPairRequest(target: string) {
