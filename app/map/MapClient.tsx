@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CircleMarker, MapContainer, Polygon, Popup, TileLayer, useMapEvents } from "react-leaflet";
 import type { LeafletMouseEvent } from "leaflet";
 import supabase, { hasSupabaseEnv } from "../utils/supabase";
@@ -41,7 +41,6 @@ export default function MapClient() {
   const [players, setPlayers] = useState<PlayerLocation[]>([]);
   const [hunt, setHunt] = useState<any>(null);
   const [mapKey] = useState(() => Math.random().toString(36).slice(2));
-  const locationRef = useRef<Point | null>(null);
 
   useEffect(() => {
     const name = localStorage.getItem("mh_name");
@@ -69,7 +68,6 @@ export default function MapClient() {
       (pos) => {
         const point: Point = [pos.coords.latitude, pos.coords.longitude];
         setCurrentLocation(point);
-        locationRef.current = point;
         setPermissionError(null);
       },
       (err) => setPermissionError(err.message || "Unable to access location."),
@@ -124,18 +122,6 @@ export default function MapClient() {
 
     return () => { supabase!.removeChannel(channel); };
   }, []);
-
-  useEffect(() => {
-    if (!playerName || !hasSupabaseEnv || !supabase) return;
-    const interval = setInterval(async () => {
-      const loc = locationRef.current;
-      if (!loc) return;
-      await supabase!
-        .from("locations")
-        .upsert({ user: playerName, lat: loc[0], lng: loc[1], updated_at: new Date().toISOString() }, { onConflict: "user" });
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [playerName]);
 
   const mapCenter = useMemo(() => currentLocation ?? [51.505, -0.09], [currentLocation]);
 

@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css";
 import { ThemeProvider } from "@/components/theme-provider"
 
 import { Toaster } from "@/components/ui/sonner"
+import LocationPublisher from "@/components/LocationPublisher"
 
 import { FaPlay, FaCog, FaRegUser } from "react-icons/fa";
 
@@ -64,6 +65,7 @@ export default function RootLayout({
           {children}
         </ThemeProvider>
 
+        <LocationPublisher />
         <Toaster />
 {/* 
         <SidebarProvider>
