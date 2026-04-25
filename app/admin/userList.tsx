@@ -174,6 +174,11 @@ export default function UserList() {
         const latest = hunts[hunts.length - 1];
         if (latest?.runners) {
             await supabase.from("hunts").insert({});
+            await Promise.all([
+                supabase.from("locations").delete().neq("user", ""),
+                supabase.from("drawntasks").delete().neq("user", ""),
+                supabase.from("tasks").delete().neq("user", ""),
+            ]);
             setHunts((prev) => [...prev, { id: null, runners: null, hunters: null, created_at: null }]);
             toast("Hunt terminated.");
         } else {

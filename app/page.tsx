@@ -272,6 +272,9 @@ export default function HomePage() {
         const updated = payload.new as any;
         setHunts((prev) => prev.map((h) => h.id === updated.id ? { ...h, ...updated } : h));
       })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "hunts" }, () => {
+        location.reload();
+      })
       .subscribe();
     return () => { sb.removeChannel(channel); };
   }, []);
