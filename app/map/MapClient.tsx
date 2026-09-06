@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleMarker, MapContainer, Polygon, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import type { LeafletMouseEvent } from "leaflet";
 import supabase, { hasSupabaseEnv } from "../utils/supabase";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 
 type Point = [number, number];
 
@@ -11,7 +12,28 @@ type PlayerLocation = {
   user: string;
   lat: number;
   lng: number;
+  updated_at?: string | null;
 };
+
+// Phones lock, tabs freeze, and a pin that keeps sitting where someone was ten
+// minutes ago is worse than no pin at all — so fade them out instead.
+const STALE_MS = 45000;
+const LOST_MS = 5 * 60000;
+const CLOCK_TICK_MS = 10000;
+
+function ageOf(p: PlayerLocation, now: number): number | null {
+  if (!now || !p.updated_at) return null;
+  const t = Date.parse(p.updated_at);
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, now - t);
+}
+
+function ageLabel(ms: number): string {
+  if (ms < 15000) return "now";
+  if (ms < 60000) return `${Math.round(ms / 1000)}s ago`;
+  if (ms < 3600000) return `${Math.round(ms / 60000)}m ago`;
+  return `${Math.round(ms / 3600000)}h ago`;
+}
 
 function MapClickHandler({ enabled, onAddPoint }: { enabled: boolean; onAddPoint: (p: Point) => void }) {
   useMapEvents({
@@ -55,6 +77,18 @@ export default function MapClient() {
   const [players, setPlayers] = useState<PlayerLocation[]>([]);
   const [hunt, setHunt] = useState<any>(null);
   const [mapKey] = useState(() => Math.random().toString(36).slice(2));
+  const [lastFixAt, setLastFixAt] = useState<number | null>(null);
+  // Starts at 0 so server and first client render agree; the effect below
+  // starts the clock that ages every pin.
+  const [now, setNow] = useState(0);
+
+  const wakeLock = useWakeLock(false);
+
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     const name = localStorage.getItem("mh_name");
@@ -82,6 +116,7 @@ export default function MapClient() {
       (pos) => {
         const point: Point = [pos.coords.latitude, pos.coords.longitude];
         setCurrentLocation(point);
+        setLastFixAt(Date.now());
         setPermissionError(null);
       },
       (err) => setPermissionError(err.message || "Unable to access location."),
@@ -144,6 +179,22 @@ export default function MapClient() {
     return pointInPolygon(currentLocation, boundary);
   }, [boundary, currentLocation]);
 
+  const selfAge = useMemo(() => {
+    if (!now || !lastFixAt) return null;
+    return Math.max(0, now - lastFixAt);
+  }, [now, lastFixAt]);
+
+  const wakeLockStatus =
+    wakeLock === "held"
+      ? "Staying awake"
+      : wakeLock === "denied"
+      ? "Wake lock refused"
+      : wakeLock === "unsupported"
+      ? "Not supported"
+      : "May auto-lock";
+  const wakeLockColor =
+    wakeLock === "held" ? "text-emerald-600" : wakeLock === "denied" ? "text-rose-600" : "text-amber-600";
+
   const boundaryStatus =
     insideBoundary === null ? "No boundary set." : insideBoundary ? "In bounds" : "Out of bounds";
   const boundaryStatusColor =
@@ -167,9 +218,17 @@ export default function MapClient() {
     if (!playerName) return players;
     if (players.some((p) => p.user === playerName)) return players;
     return currentLocation
-      ? [...players, { user: playerName, lat: currentLocation[0], lng: currentLocation[1] }]
+      ? [
+          ...players,
+          {
+            user: playerName,
+            lat: currentLocation[0],
+            lng: currentLocation[1],
+            updated_at: lastFixAt ? new Date(lastFixAt).toISOString() : null,
+          },
+        ]
       : players;
-  }, [players, playerName, currentLocation]);
+  }, [players, playerName, currentLocation, lastFixAt]);
 
   return (
     <div className="min-h-screen bg-stone-200 dark:bg-neutral-950 text-slate-900 dark:text-slate-100">
@@ -214,17 +273,28 @@ export default function MapClient() {
                 const isSelf = p.user === playerName;
                 const color = isSelf ? "#1d4ed8" : playerColor(p.user);
                 const fill = isSelf ? "#60a5fa" : playerColor(p.user);
+                const age = ageOf(p, now);
+                const stale = age !== null && age > STALE_MS;
+                const lost = age !== null && age > LOST_MS;
                 return (
                   <CircleMarker
                     key={p.user}
                     center={[p.lat, p.lng]}
                     radius={isSelf ? 12 : 10}
-                    pathOptions={{ color, fillColor: fill, fillOpacity: isSelf ? 0.9 : 0.75 }}
+                    pathOptions={{
+                      color,
+                      fillColor: fill,
+                      fillOpacity: lost ? 0.1 : stale ? 0.3 : isSelf ? 0.9 : 0.75,
+                      opacity: lost ? 0.5 : 1,
+                      dashArray: stale ? "4 4" : undefined,
+                    }}
                   >
                     <Popup>
                       {isSelf ? `You (${p.user})` : p.user}
                       <br />
                       {playerRole(p.user)}
+                      <br />
+                      {age === null ? "Last seen: unknown" : `Last seen: ${ageLabel(age)}`}
                     </Popup>
                   </CircleMarker>
                 );
@@ -247,6 +317,24 @@ export default function MapClient() {
                       : currentLocation
                       ? `${currentLocation[0].toFixed(5)}, ${currentLocation[1].toFixed(5)}`
                       : "Waiting for GPS..."}
+                  </div>
+                  {currentLocation && !permissionError && (
+                    <div
+                      className={`mt-1 text-xs ${
+                        selfAge !== null && selfAge > STALE_MS
+                          ? "text-amber-600 dark:text-amber-500"
+                          : "text-slate-500"
+                      }`}
+                    >
+                      {selfAge === null ? "Last fix: —" : `Last fix ${ageLabel(selfAge)}`}
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-2xl bg-slate-100 dark:bg-slate-800 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Screen</div>
+                  <div className={`mt-2 text-base font-medium ${wakeLockColor}`}>{wakeLockStatus}</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Tracking stops once your phone locks or you leave this tab.
                   </div>
                 </div>
                 <div className="rounded-2xl bg-slate-100 dark:bg-slate-800 p-4">
@@ -273,16 +361,26 @@ export default function MapClient() {
                   allPlayers.map((p) => {
                     const isSelf = p.user === playerName;
                     const color = isSelf ? "#1d4ed8" : playerColor(p.user);
+                    const age = ageOf(p, now);
+                    const stale = age !== null && age > STALE_MS;
+                    const lost = age !== null && age > LOST_MS;
                     return (
                       <div
                         key={p.user}
-                        className="rounded-2xl bg-slate-100 dark:bg-slate-800 p-3 text-sm flex items-center gap-2"
+                        className={`rounded-2xl bg-slate-100 dark:bg-slate-800 p-3 text-sm flex items-center gap-2 ${
+                          lost ? "opacity-50" : ""
+                        }`}
                       >
                         <span
                           className="inline-block w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: color }}
+                          style={{ backgroundColor: color, opacity: stale ? 0.4 : 1 }}
                         />
                         <span className="flex-1 truncate">{isSelf ? `You (${p.user})` : p.user}</span>
+                        <span
+                          className={`text-xs ${stale ? "text-amber-600 dark:text-amber-500" : "text-slate-500"}`}
+                        >
+                          {age === null ? "—" : ageLabel(age)}
+                        </span>
                         <span className="text-xs text-slate-500">{playerRole(p.user)}</span>
                       </div>
                     );
